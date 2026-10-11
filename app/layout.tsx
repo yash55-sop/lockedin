@@ -6,7 +6,6 @@ import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
 
 import { Providers } from "@/components/providers";
-import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { Toaster } from "@/components/ui/sonner";
 import { siteConfig } from "@/config/site";
 import { fontHandwriting, fontHeading, fontMono, fontSans } from "@/lib/fonts";
@@ -81,7 +80,6 @@ export default function RootLayout({ children }: React.PropsWithChildren) {
           </Providers>
 
           <Analytics />
-          <TailwindIndicator />
         </body>
       </html>
     </React.StrictMode>

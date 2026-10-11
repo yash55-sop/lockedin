@@ -1,8 +1,12 @@
 export const siteConfig = {
-  name: "Lipi",
-  url: "https://lipi.rajputhemant.me",
+  name: "LockedIn",
+  url:
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.AUTH_URL ||
+    process.env.NEXTAUTH_URL ||
+    "http://localhost:3000",
   description:
-    "🚀 A SAAS web app, a Notion.so replica, featuring real-time collaboration and customizable workspaces built using ▲ Next.js, shadcn/ui, TailwindCSS",
+    "Your personal workspace for tasks, study plans, goals, and custom productivity templates.",
 
   author: {
     name: "Hemant Rajput",

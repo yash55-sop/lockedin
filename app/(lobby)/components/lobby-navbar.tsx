@@ -1,57 +1,32 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/icons";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
-import { cn } from "@/lib/utils";
 
 export function LobbyNavbar() {
   return (
-    <header className="mt-3 h-14">
-      <nav className="container flex h-full items-center justify-between">
+    <header className="h-16 border-b">
+      <nav
+        aria-label="Application"
+        className="container flex h-full items-center justify-between"
+      >
         <Link
-          href="/"
-          className="flex gap-2 px-4 font-handwriting text-xl lowercase [text-shadow:_0_2px_0_#e1e1e1] dark:[text-shadow:none]"
+          href="/templates"
+          className="flex items-center gap-2 font-semibold"
         >
-          <Logo size={28} />
+          <Logo size={24} />
           {siteConfig.name}
         </Link>
-
-        <div className="hidden space-x-4 px-5 text-sm font-medium text-muted-foreground md:inline-block">
+        <div className="flex items-center gap-2">
           <Link
-            href="/#features"
-            className="transition-colors hover:text-foreground"
+            href="/templates"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
           >
-            Features
+            Open workspace
           </Link>
-          <Link
-            href="/pricing"
-            className="transition-colors hover:text-foreground"
-          >
-            Pricing
-          </Link>
-        </div>
-
-        <div className="flex flex-1 justify-end gap-2">
-          <Link
-            href="/login"
-            className={cn(
-              buttonVariants({ variant: "outline" }),
-              "hidden h-8 rounded-full px-5 font-semibold transition-all duration-200 hover:ring-2 hover:ring-border hover:ring-offset-2 hover:ring-offset-background sm:inline-flex"
-            )}
-          >
-            Login
-          </Link>
-
-          <Link
-            href="/signup"
-            className={cn(
-              buttonVariants(),
-              "h-8 rounded-full px-3 font-semibold transition-all duration-200 hover:ring-2 hover:ring-foreground hover:ring-offset-2 hover:ring-offset-background"
-            )}
-          >
-            Sign Up
-          </Link>
+          <ThemeToggle />
         </div>
       </nav>
     </header>
