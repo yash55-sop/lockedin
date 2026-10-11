@@ -1,106 +1,73 @@
-<div align=center>
+# LockedIn
 
-<!-- labels -->
+A personal productivity workspace built on Lipi. Create and edit tasks, study plans,
+goals, charts, heatmaps, tables, and reusable templates while keeping the existing
+editor style and theme.
 
-![][ci] ![][views] ![][stars] ![][forks] ![][issues] ![][license] ![][repo-size]
+## Run locally
 
-<!-- title -->
+Use Node.js 22+ and npm from this `lipi/` checkout:
 
-# Lipi
-
-### [WIP] 🚀 A SAAS web app, a Notion.so replica, featuring real-time collaboration and customizable workspaces built using ▲ Next.js, shadcn/ui, TailwindCSS
-
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="https://graph.org/file/93d7d38ec83bc4e9ba1d3.png">
-  <source media="(prefers-color-scheme: dark)" srcset="https://graph.org/file/ad59213e3b1ece0bdc95e.png">
-  <img src="https://graph.org/file/93d7d38ec83bc4e9ba1d3.png" alt="lipi">
-</picture>
-
-**[<kbd> <br> &nbsp;**Live Demo**&nbsp; <br> </kbd>][site]**
-
-## Building from Source
-
-</div>
-
-- Fetch latest source code from master branch.
-
-```
-git clone https://github.com/rajput-hemant/lipi
-cd lipi
+```sh
+npm ci --legacy-peer-deps
+npm run dev -- --hostname 127.0.0.1
 ```
 
-- Rename **.env.example** => **.env.local**, add your own environment variables.
+Open `http://127.0.0.1:3000/templates` (or the port reported by the dev server).
+The public workspace works without login, Postgres, or an AI key. The home and
+previous pricing route open the workspace directly.
 
-- Run the app with VS Code or the command line:
+The sidebar switches between independent browser-local pages. Create a blank page,
+start from one of eight original templates, or make a copy of a saved reusable
+template. Edit existing components or use **Vibe a template** to review prompt-driven
+creation/refinement. Export JSON for a portable copy; browser storage is not cloud sync.
 
+## Optional services
+
+Copy `.env.example` to `.env.local` and keep credentials out of Git.
+
+- Authenticated cloud workspaces require `DATABASE_URL`, `AUTH_SECRET` or
+  `NEXTAUTH_SECRET` (32+ characters), and migrations via `npm run db:migrate`.
+  Configure `AUTH_URL`/`NEXTAUTH_URL` for the deployed origin. OAuth and Redis are optional.
+- AI uses a server-only `AI_API_KEY`, `ORCAROUTER_API_KEY`, or `OPENAI_API_KEY`,
+  plus `AI_MODEL` and optional HTTPS `AI_BASE_URL`/`AI_PROTOCOL`.
+  Production requires login. Anonymous local AI requires development mode,
+  `AI_ALLOW_LOCAL_STUDIO=true`, and a loopback-bound server.
+- AI creation sends the description; editing explicitly discloses that it also
+  sends the current document to the configured provider. Preview before applying.
+- `NEXT_PUBLIC_APP_URL` sets the public metadata URL. No LockedIn domain is assumed.
+
+Existing SQL tables retain their `lipi_` namespace, and old browser draft/library
+keys remain readable. Renaming the product does not rename persisted data.
+
+## Verification and development
+
+```sh
+npm test
+npm run type-check
+npm run lint
+npm run build
 ```
-bun i || pnpm i || npm i || yarn
-bun dev || pnpm dev || npm run dev || yarn dev
-```
 
-<div align=center>
+A production build needs a configured authentication secret. Set
+`LIPI_BUILD_DIR=.next-verify` when verifying beside a running dev server. Docker
+configuration uses the npm lockfile; `make build`, `make start`, and `make stop`
+operate the container when Docker is available.
 
-### Docker and Makefile
+Read [agent guidance](AGENTS.md), [architecture](docs/architecture.md),
+[template behavior and research](docs/template-components.md),
+[productivity agent plan](docs/productivity-agent-plan.md), and
+[validation](docs/validation.md). Current service gaps are recorded there; do not
+assume account, billing, OAuth, or cloud persistence works without configuration.
 
-</div>
+Publish verified changes to [yash55-sop/lockedin](https://github.com/yash55-sop/lockedin)
+using focused conventional commits. The npm commit hooks format and lint staged
+files and check commit messages. Keep local credentials and browser workspace data
+out of commits.
 
-- Build the Docker Image and start the container:
+## Upstream attribution
 
-```
-make build
-make start
-```
-
-- Stop the Docker container:
-
-```
-make stop
-```
-
-<div align=center>
-
-### Deploy Your Own
-
-You can deploy your own hosted version of `lipi`. Just click the link below to deploy a ready-to-go version to Vercel.
-
-[![Deploy with Vercel](https://vercel.com/button)][deploy]
-
-## Star History
-
-<a href="https://star-history.com/#rajput-hemant/lipi">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rajput-hemant/lipi&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rajput-hemant/lipi" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rajput-hemant/lipi" />
- </picture>
-</a>
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributors:
-
-[![][contributors]][contributors-graph]
-
-_Note: It may take up to 24h for the [contrib.rocks][contrib-rocks] plugin to update because it's refreshed once a day._
-
-</div>
-
-<!----------------------------------{ Labels }--------------------------------->
-
-[views]: https://komarev.com/ghpvc/?username=lipi&label=view%20counter&color=red&style=flat
-[repo-size]: https://img.shields.io/github/repo-size/rajput-hemant/lipi
-[issues]: https://img.shields.io/github/issues-raw/rajput-hemant/lipi
-[license]: https://img.shields.io/github/license/rajput-hemant/lipi
-[forks]: https://img.shields.io/github/forks/rajput-hemant/lipi?style=flat
-[stars]: https://img.shields.io/github/stars/rajput-hemant/lipi
-[contributors]: https://contrib.rocks/image?repo=rajput-hemant/lipi&max=500
-[contributors-graph]: https://github.com/rajput-hemant/lipi/graphs/contributors
-[contrib-rocks]: https://contrib.rocks/preview?repo=rajput-hemant%2Flipi
-[ci]: https://github.com/rajput-hemant/lipi/actions/workflows/ci.yml/badge.svg
-
-<!-----------------------------------{ Links }---------------------------------->
-
-[site]: https://lipi.rajputhemant.me
-[deploy]: https://vercel.com/new/clone?repository-url=https://github.com/rajput-hemant/lipi&project-name=lipi&repo-name=lipi&env=SKIP_ENV_VALIDATION,AUTH_SECRET,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,GITHUB_ACCESS_TOKEN,DATABASE_URL,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN,ENABLE_RATE_LIMITING,RATE_LIMITING_REQUESTS_PER_SECOND
+LockedIn is based on [Lipi by Hemant Rajput](https://github.com/rajput-hemant/lipi),
+using Next.js, React, shadcn/Radix, and Tailwind CSS. The adjacent
+[notion-kit](https://github.com/steeeee0223/notion-kit) checkout is a reference.
+Original copyright notices and the [MIT license](LICENSE) are preserved.
