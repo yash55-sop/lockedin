@@ -66,9 +66,12 @@ export async function getGitHubStars(): Promise<string | null> {
       {
         headers: {
           Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${env.GITHUB_ACCESS_TOKEN}`,
+          ...(env.GITHUB_ACCESS_TOKEN ?
+            { Authorization: `Bearer ${env.GITHUB_ACCESS_TOKEN}` }
+          : {}),
         },
         next: { revalidate: 60 },
+        signal: AbortSignal.timeout(5000),
       }
     );
 

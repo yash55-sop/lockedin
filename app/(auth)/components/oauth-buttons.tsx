@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Loader2 } from "lucide-react";
-import { signIn } from "next-auth/react";
+import { getProviders, signIn } from "next-auth/react";
 import { toast } from "sonner";
 
 import { GitHub, Google } from "@/components/icons";
@@ -17,11 +17,23 @@ export function OAuthButtons(props: OAuthButtonProps) {
   const { isFormDisabled, setIsSubmitting } = props;
 
   const [oauthLoading, setOauthLoading] = React.useState<"google" | "github">();
+  const [available, setAvailable] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    let active = true;
+    getProviders()
+      .then((providers) => {
+        if (active) setAvailable(Object.keys(providers ?? {}));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function signInToaster(promise: Promise<unknown>) {
     toast.promise(promise, {
       loading: "Signing in...",
-      success: "You have been signed in.",
+      success: "Redirecting to your sign-in provider...",
       error: "Something went wrong.",
       finally: () => {
         setIsSubmitting(false);
@@ -66,7 +78,12 @@ export function OAuthButtons(props: OAuthButtonProps) {
         <Button
           size="sm"
           onClick={googleSignInHandler}
-          disabled={isFormDisabled}
+          disabled={isFormDisabled || !available.includes("google")}
+          title={
+            available.includes("google") ?
+              "Sign in with Google"
+            : "Google sign-in is not configured"
+          }
           className="w-full font-semibold shadow-md"
         >
           {oauthLoading === "google" ?
@@ -78,7 +95,12 @@ export function OAuthButtons(props: OAuthButtonProps) {
         <Button
           size="sm"
           onClick={githubSignInHandler}
-          disabled={isFormDisabled}
+          disabled={isFormDisabled || !available.includes("github")}
+          title={
+            available.includes("github") ?
+              "Sign in with GitHub"
+            : "GitHub sign-in is not configured"
+          }
           className="w-full font-semibold shadow-md"
         >
           {oauthLoading === "github" ?

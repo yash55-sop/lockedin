@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AtSign, Eye, EyeOff, Fingerprint, Loader2, Mail } from "lucide-react";
 import { signIn } from "next-auth/react";
@@ -38,6 +38,7 @@ const defaultValues: FormData = {
 };
 
 export function LoginForm() {
+  const router = useRouter();
   const [isEmailMode, setIsEmailMode] = React.useState(true);
   const [isPassVisible, setIsPassVisible] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -45,11 +46,12 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const authError = searchParams.get("error");
 
-  if (authError === "OAuthAccountNotLinked") {
-    toast.error("OAuth Account Not Linked", {
-      description: "This account is already linked with another provider.",
-    });
-  }
+  React.useEffect(() => {
+    if (authError === "OAuthAccountNotLinked")
+      toast.error("OAuth Account Not Linked", {
+        description: "This account is already linked with another provider.",
+      });
+  }, [authError]);
 
   const form = useForm<FormData>({
     resolver: zodResolver(loginSchema),
@@ -60,15 +62,28 @@ export function LoginForm() {
     setIsSubmitting(true);
 
     try {
-      toast.promise(signIn("credentials", { ...formData }), {
-        loading: "Signing in...",
-        success: "You have been signed in.",
-        error: "Something went wrong.",
-        finally: () => setIsSubmitting(false),
+      const result = await signIn("credentials", {
+        ...formData,
+        redirect: false,
       });
+      if (result?.error) {
+        toast.error("Invalid credentials. Please try again.");
+        return;
+      }
+      toast.success("You have been signed in.");
+      const from = searchParams.get("from");
+      const target =
+        from && from.startsWith("/dashboard") && !from.startsWith("//") ?
+          from
+        : "/dashboard";
+      router.replace(target);
+      router.refresh();
     } catch (error) {
       const err = error as Error;
       console.error(err.message);
+      toast.error("Unable to sign in. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -101,7 +116,15 @@ export function LoginForm() {
                       }
                       tabIndex={-1}
                       type="button"
-                      onClick={() => setIsEmailMode(!isEmailMode)}
+                      disabled={isSubmitting}
+                      onClick={() => {
+                        const nextMode = !isEmailMode;
+                        setIsEmailMode(nextMode);
+                        form.setValue("type", nextMode ? "email" : "username");
+                        if (nextMode) form.setValue("email", "");
+                        else form.setValue("username", "");
+                        form.clearErrors();
+                      }}
                       className="absolute inset-y-0 right-2 my-auto text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                     >
                       {isEmailMode ?
@@ -189,7 +212,7 @@ export function LoginForm() {
           href="/reset-password"
           className="underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
         >
-          Forgot password?
+          Change password
         </Link>
       </p>
 

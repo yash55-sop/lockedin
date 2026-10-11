@@ -2,10 +2,12 @@
 
 import { unstable_cache as cache, revalidateTag } from "next/cache";
 import { and, eq, notExists } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Workspace } from "@/types/db";
 
 import { db } from "..";
+import { recordFields, requireUser } from "../access";
 import { collaborators, users, workspaces } from "../schema";
 
 /**
@@ -14,8 +16,15 @@ import { collaborators, users, workspaces } from "../schema";
  * @returns Created workspace
  */
 export async function createWorkspace(workspace: Workspace) {
+  const user = await requireUser();
+  const fields = recordFields
+    .extend({ id: z.string().uuid().optional() })
+    .parse(workspace);
   try {
-    const [data] = await db.insert(workspaces).values(workspace).returning();
+    const [data] = await db
+      .insert(workspaces)
+      .values({ ...fields, workspaceOwnerId: user.id })
+      .returning();
 
     return data;
   } catch (e) {
@@ -32,7 +41,7 @@ export async function createWorkspace(workspace: Workspace) {
  * @param userID User ID
  * @returns Private workspaces
  */
-export const getPrivateWorkspaces = cache(
+const readPrivateWorkspaces = cache(
   async (userID: string) => {
     try {
       const data = await db
@@ -64,7 +73,7 @@ export const getPrivateWorkspaces = cache(
  * @param userId User ID
  * @returns Collaborating workspaces
  */
-export const getCollaboratingWorkspaces = cache(
+const readCollaboratingWorkspaces = cache(
   async (userId: string) => {
     try {
       const data = await db
@@ -88,7 +97,7 @@ export const getCollaboratingWorkspaces = cache(
  * @param userId User ID
  * @returns Shared workspaces
  */
-export const getSharedWorkspaces = cache(
+const readSharedWorkspaces = cache(
   async (userId: string) => {
     try {
       const data = await db
@@ -107,3 +116,21 @@ export const getSharedWorkspaces = cache(
   ["get_shared_workspaces"],
   { tags: ["get_shared_workspaces"] }
 );
+
+export async function getPrivateWorkspaces(userId: string) {
+  const user = await requireUser();
+  if (user.id !== userId) throw new Error("Access denied.");
+  return readPrivateWorkspaces(user.id);
+}
+
+export async function getCollaboratingWorkspaces(userId: string) {
+  const user = await requireUser();
+  if (user.id !== userId) throw new Error("Access denied.");
+  return readCollaboratingWorkspaces(user.id);
+}
+
+export async function getSharedWorkspaces(userId: string) {
+  const user = await requireUser();
+  if (user.id !== userId) throw new Error("Access denied.");
+  return readSharedWorkspaces(user.id);
+}

@@ -29,6 +29,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useAppState } from "@/hooks/use-app-state";
+import { notifyMutation } from "@/lib/client-mutation";
 import {
   createFile,
   createFolder,
@@ -37,7 +38,7 @@ import {
   updateFileInDb,
   updateFolderInDb,
 } from "@/lib/db/queries";
-import { cn, currentlyInDev, isAppleDevice } from "@/lib/utils";
+import { cn, isAppleDevice } from "@/lib/utils";
 import { EmojiPicker } from "../emoji-picker";
 import { useSubscriptionModal } from "../subscription-modal-provider";
 import {
@@ -62,8 +63,10 @@ import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 import { ScrollArea, ScrollBar } from "../ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { useRenameItem } from "./rename-dialog";
 
 export function Folders() {
+  const { renameFile, renameFolder, dialog } = useRenameItem();
   const pathname = usePathname();
   const { setOpen, subscription } = useSubscriptionModal();
 
@@ -143,10 +146,13 @@ export function Folders() {
 
     addFolder(newFolder);
 
-    toast.promise(createFolder(newFolder), {
+    void notifyMutation(createFolder(newFolder), {
       loading: "Creating folder...",
       success: "Folder created.",
-      error: "Something went wrong! Unable to create folder.",
+      error: () => {
+        deleteFolder(newFolder.id!);
+        return "Something went wrong! Unable to create folder.";
+      },
     });
 
     setSelectedEmoji("");
@@ -175,10 +181,13 @@ export function Folders() {
 
     addFile(newFile);
 
-    toast.promise(createFile(newFile), {
+    void notifyMutation(createFile(newFile), {
       loading: "Creating file...",
       success: "File created.",
-      error: "Something went wrong! Unable to create file.",
+      error: () => {
+        deleteFile(newFile.id!);
+        return "Something went wrong! Unable to create file.";
+      },
     });
 
     setSelectedEmoji("");
@@ -198,11 +207,17 @@ export function Folders() {
     const updatedFile: File = { ...file, inTrash: true };
     updateFile(updatedFile);
 
-    toast.promise(updateFileInDb(updatedFile), {
-      loading: "Moving file to trash...",
-      success: "File moved to trash.",
-      error: "Something went wrong! Unable to move file to trash.",
-    });
+    void notifyMutation(
+      updateFileInDb({ id: updatedFile.id, inTrash: updatedFile.inTrash }),
+      {
+        loading: "Moving file to trash...",
+        success: "File moved to trash.",
+        error: () => {
+          updateFile(file);
+          return "Something went wrong! Unable to move file to trash.";
+        },
+      }
+    );
   }
 
   async function moveFolderToTrash(folderId: string) {
@@ -215,30 +230,43 @@ export function Folders() {
 
     const updatedFolder: Folder = { ...folder, inTrash: true };
     updateFolder(updatedFolder);
-    toast.promise(updateFolderInDb({ ...folder, inTrash: true }), {
+    void notifyMutation(updateFolderInDb({ id: folder.id, inTrash: true }), {
       loading: "Moving folder to trash...",
       success: "Folder moved to trash.",
-      error: "Something went wrong! Unable to move folder to trash.",
+      error: () => {
+        updateFolder(folder);
+        return "Something went wrong! Unable to move folder to trash.";
+      },
     });
   }
 
   async function deleteFileHandler(fileId: string) {
+    const file = stateFiles.find((f) => f.id === fileId);
     deleteFile(fileId);
 
-    toast.promise(deleteFileFromDb(fileId), {
+    void notifyMutation(deleteFileFromDb(fileId), {
       loading: "Deleting file...",
       success: "File deleted.",
-      error: "Something went wrong! Unable to delete file.",
+      error: () => {
+        if (file) addFile(file);
+        return "Something went wrong! Unable to delete file.";
+      },
     });
   }
 
   async function deleteFolderHandler(folderId: string) {
+    const folder = stateFolders.find((f) => f.id === folderId);
+    const childFiles = stateFiles.filter((f) => f.folderId === folderId);
     deleteFolder(folderId);
 
-    toast.promise(deleteFolderFromDb(folderId), {
+    void notifyMutation(deleteFolderFromDb(folderId), {
       loading: "Deleting folder...",
       success: "Folder deleted.",
-      error: "Something went wrong! Unable to delete folder.",
+      error: () => {
+        if (folder) addFolder(folder);
+        childFiles.forEach(addFile);
+        return "Something went wrong! Unable to delete folder.";
+      },
     });
   }
 
@@ -355,7 +383,7 @@ export function Folders() {
                         </ContextMenuItem>
 
                         <ContextMenuItem
-                          onClick={currentlyInDev}
+                          onClick={() => renameFolder(id!)}
                           className="cursor-pointer"
                         >
                           <Edit2 className="mr-2 size-4 shrink-0" />
@@ -471,7 +499,7 @@ export function Folders() {
                                 <TooltipTrigger asChild>
                                   <Button
                                     variant="ghost"
-                                    onClick={currentlyInDev}
+                                    onClick={() => renameFile(id!)}
                                     className="size-7 p-0 text-muted-foreground"
                                   >
                                     <Edit2 className="size-4" />
@@ -481,19 +509,19 @@ export function Folders() {
                               </Tooltip>
 
                               <AlertDialog>
-                                <AlertDialogTrigger>
-                                  <Tooltip delayDuration={0}>
-                                    <TooltipTrigger asChild>
+                                <Tooltip delayDuration={0}>
+                                  <TooltipTrigger asChild>
+                                    <AlertDialogTrigger asChild>
                                       <Button
                                         variant="ghost"
                                         className="size-7 p-0 text-muted-foreground hover:text-red-500"
                                       >
                                         <Trash className="size-4" />
                                       </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Delete file</TooltipContent>
-                                  </Tooltip>
-                                </AlertDialogTrigger>
+                                    </AlertDialogTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Delete file</TooltipContent>
+                                </Tooltip>
 
                                 <AlertDialogContent>
                                   <AlertDialogHeader>
@@ -553,6 +581,7 @@ export function Folders() {
           </div>
         }
       </div>
+      {dialog}
     </>
   );
 }

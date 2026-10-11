@@ -72,8 +72,17 @@ export function SiteFooter() {
               {section.links.map((link) => (
                 <a
                   key={link}
-                  href={githubUrl}
-                  target="_blank"
+                  href={
+                    link === "Privacy" ? "/privacy"
+                    : link === "Terms of use" ?
+                      "/terms"
+                    : githubUrl
+                  }
+                  target={
+                    link === "Privacy" || link === "Terms of use" ?
+                      undefined
+                    : "_blank"
+                  }
                   rel="noreferrer"
                   className="text-sm text-muted-foreground duration-200 hover:text-foreground"
                 >
@@ -88,7 +97,7 @@ export function SiteFooter() {
             </h3>
 
             <p className="mb-1.5 text-[13px] leading-6 text-muted-foreground lg:text-sm">
-              Join Our Community! Get exclusive travel offers and insider tips.
+              Get productivity updates and tips from our community.
             </p>
             <NewsletterSubscriptionForm />
           </div>

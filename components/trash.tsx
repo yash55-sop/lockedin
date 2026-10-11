@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import type { File } from "@/types/db";
 
 import { useAppState } from "@/hooks/use-app-state";
+import { notifyMutation } from "@/lib/client-mutation";
 import {
   deleteFileFromDb,
   deleteFolderFromDb,
@@ -24,6 +25,7 @@ import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function Trash() {
+  const [isClearing, setIsClearing] = React.useState(false);
   const {
     files,
     addFile,
@@ -49,11 +51,17 @@ export function Trash() {
     const updatedFile: File = { ...file, inTrash: false };
     updateFile(updatedFile);
 
-    toast.promise(updateFileInDb(updatedFile), {
-      loading: "Restoring file...",
-      success: "File restored",
-      error: "Failed to restore file",
-    });
+    await notifyMutation(
+      updateFileInDb({ id: updatedFile.id, inTrash: updatedFile.inTrash }),
+      {
+        loading: "Restoring file...",
+        success: "File restored",
+        error: () => {
+          updateFile(file);
+          return "Failed to restore file";
+        },
+      }
+    );
   }
 
   async function restoreFolder(folderId: string) {
@@ -67,22 +75,31 @@ export function Trash() {
     const updatedFolder: File = { ...folder, inTrash: false };
     updateFolder(updatedFolder);
 
-    toast.promise(updateFolderInDb(updatedFolder), {
-      loading: "Restoring folder...",
-      success: "Folder restored",
-      error: "Failed to restore folder",
-    });
+    await notifyMutation(
+      updateFolderInDb({
+        id: updatedFolder.id,
+        inTrash: updatedFolder.inTrash,
+      }),
+      {
+        loading: "Restoring folder...",
+        success: "Folder restored",
+        error: () => {
+          updateFolder(folder);
+          return "Failed to restore folder";
+        },
+      }
+    );
   }
 
   async function deleteFileHandler(fileId: string) {
     const file = files.find((f) => f.id === fileId);
     deleteFile(fileId);
 
-    toast.promise(deleteFileFromDb(fileId), {
+    await notifyMutation(deleteFileFromDb(fileId), {
       loading: "Deleting file...",
       success: "File deleted permanently.",
       error: () => {
-        addFile(file!);
+        if (file) addFile(file);
         return "Something went wrong! Unable to delete file.";
       },
     });
@@ -90,21 +107,36 @@ export function Trash() {
 
   async function deleteFolderHandler(folderId: string) {
     const folder = folders.find((f) => f.id === folderId);
+    const childFiles = files.filter((f) => f.folderId === folderId);
     deleteFolder(folderId);
 
-    toast.promise(deleteFolderFromDb(folderId), {
+    await notifyMutation(deleteFolderFromDb(folderId), {
       loading: "Deleting folder...",
       success: "Folder deleted permanently.",
       error: () => {
-        addFolder(folder!);
+        if (folder) addFolder(folder);
+        childFiles.forEach(addFile);
         return "Something went wrong! Unable to delete folder.";
       },
     });
   }
 
   async function clearTrash() {
-    Promise.all(trashedFiles.map((f) => deleteFileHandler(f.id!)));
-    Promise.all(trashedFolders.map((f) => deleteFolderHandler(f.id!)));
+    if (isClearing) return;
+    setIsClearing(true);
+    try {
+      const folderIds = new Set(trashedFolders.map((folder) => folder.id));
+      await Promise.all(
+        trashedFiles
+          .filter((file) => !folderIds.has(file.folderId ?? undefined))
+          .map((file) => deleteFileHandler(file.id!))
+      );
+      await Promise.all(
+        trashedFolders.map((folder) => deleteFolderHandler(folder.id!))
+      );
+    } finally {
+      setIsClearing(false);
+    }
   }
 
   return (
@@ -240,7 +272,9 @@ export function Trash() {
           size="sm"
           variant="destructive"
           onClick={clearTrash}
-          disabled={!trashedFiles.length && !trashedFolders.length}
+          disabled={
+            isClearing || (!trashedFiles.length && !trashedFolders.length)
+          }
         >
           <TrashIcon className="mr-1 size-4" /> Clear Trash
         </Button>

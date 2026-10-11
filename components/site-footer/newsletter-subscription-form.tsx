@@ -28,17 +28,13 @@ export function NewsletterSubscriptionForm() {
   );
 
   async function subscribeToNewsletter(_: Form, _formData: FormData) {
-    // TODO: Add newsletter subscription logic here.
-    toast.promise(new Promise((resolve) => setTimeout(resolve, 1500)), {
-      loading: "Subscribing...",
-      error: "Something went wrong.",
-      success: "You have successfully subscribed to our newsletter.",
-    });
+    const message = "Newsletter signup is not configured yet.";
+    toast.info(message);
 
     return {
       errors: [],
-      message: null,
-      subscribed: true,
+      message,
+      subscribed: false,
     };
   }
 

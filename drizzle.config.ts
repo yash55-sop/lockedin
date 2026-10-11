@@ -3,8 +3,6 @@ import { loadEnvConfig } from "@next/env";
 
 import type { Config } from "drizzle-kit";
 
-import { siteConfig } from "@/config/site";
-
 loadEnvConfig(cwd());
 
 if (!process.env.DATABASE_URL) {
@@ -17,5 +15,6 @@ export default {
   dialect: "postgresql",
   verbose: true,
   dbCredentials: { url: process.env.DATABASE_URL },
-  tablesFilter: [`${siteConfig.name.toLowerCase().replace(/\s/g, "_")}_*`],
+  // Existing migrations and SQL tables keep their original namespace.
+  tablesFilter: ["lipi_*"],
 } satisfies Config;

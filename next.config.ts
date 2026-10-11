@@ -4,18 +4,14 @@ import type { NextConfig } from "next";
 import "./lib/env";
 
 const isDocker = process.env.IS_DOCKER === "true";
-const isProd = process.env.NODE_ENV === "production";
 
 const config: NextConfig = {
+  distDir: process.env.LIPI_BUILD_DIR || ".next",
   reactStrictMode: true,
+  devIndicators: false,
   images: {
     remotePatterns: [],
     unoptimized: !isDocker,
-  },
-  experimental: {
-    ppr: true,
-    reactCompiler: isProd,
-    // ...
   },
 
   output: isDocker ? "standalone" : undefined /* ... */,

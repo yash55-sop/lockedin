@@ -11,13 +11,15 @@ export const usernameSchema = z
 
 export const emailSchema = z
   .string()
+  .trim()
+  .toLowerCase()
   .min(1, "Email is Required")
   .email("Please enter a valid email");
 
 export const passwordSchema = z
   .string()
   .min(1, "Password is Required")
-  .regex(/^(?!\s*$).+/, "Password must not contain Whitespaces.")
+  .regex(/^\S+$/, "Password must not contain Whitespaces.")
   .regex(/^(?=.*[A-Z])/, "Password must contain at least one uppercase letter.")
   .regex(/^(?=.*[a-z])/, "Password must contain at least one lowercase letter.")
   .regex(/^(?=.*\d)/, "Password must contain at least one number.")
@@ -25,7 +27,12 @@ export const passwordSchema = z
     /^(?=.*[~`!@#$%^&*()--+={}[\]|\\:;"'<>,.?/_₹])/,
     "Password must contain at least one special character."
   )
-  .min(8, "Password must be at least 8 characters long.");
+  .min(8, "Password must be at least 8 characters long.")
+  .max(72, "Password must be at most 72 characters long.")
+  .refine(
+    (value) => new TextEncoder().encode(value).length <= 72,
+    "Password must fit within 72 UTF-8 bytes."
+  );
 
 export const loginSchema = z.discriminatedUnion("type", [
   z.object({

@@ -8,7 +8,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      SKIP_ENV_VALIDATION: true
+      NEXTAUTH_SECRET: ci-only-build-secret-at-least-32-characters
+      HUSKY: "0"
 
     steps:
       - name: Checkout repository
@@ -16,22 +17,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: "22"
+          cache: npm
 
       - name: Install dependencies
-        run: bun i
+        run: npm ci --legacy-peer-deps
 
       - name: Check types
-        run: bun run type-check
+        run: npm run type-check
 
       - name: Check linting
-        run: bun run lint
+        run: npm run lint
 
       - name: Run tests
-        run: bun test
+        run: npm run test
+
+      - name: Production build
+        run: npm run build
 
       - name: Check commits messages
         uses: wagoid/commitlint-github-action@v6

@@ -1,22 +1,23 @@
 # 1. Install dependencies only when needed
-FROM oven/bun:1 AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
-COPY package.json bun.lockb ./
-RUN bun install --frozen-lockfile
+COPY package.json package-lock.json ./
+ENV HUSKY=0
+RUN npm ci --legacy-peer-deps
 
 # 2. Rebuild the source code only when needed
-FROM node:22.11.0-alpine AS base
+FROM node:22-alpine AS base
 
 FROM base AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-COPY .env.local .env.production
-
-RUN npm run build -- --no-lint
+ENV IS_DOCKER=true
+ENV SKIP_ENV_VALIDATION=true
+RUN npm run build
 
 # 3. Production image, copy all the files and run next
 FROM base AS runner
@@ -24,6 +25,7 @@ WORKDIR /app
 
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
+ENV HOSTNAME="0.0.0.0"
 
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nextjs -u 1001

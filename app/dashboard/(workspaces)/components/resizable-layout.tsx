@@ -30,6 +30,7 @@ export function ResizableLayout(props: ResizableLayoutProps) {
   return (
     <ResizablePanelGroup
       direction="horizontal"
+      className="h-screen"
       onLayout={(sizes) => {
         setCookie("react-resizable-panels:layout", JSON.stringify(sizes));
       }}
@@ -59,9 +60,12 @@ export function ResizableLayout(props: ResizableLayoutProps) {
 
       <ResizableHandle withHandle className="hidden lg:flex" />
 
-      <ResizablePanel defaultSize={defaultLayout[1]}>
+      <ResizablePanel
+        defaultSize={defaultLayout[1]}
+        className="flex min-w-0 flex-col"
+      >
         <Navbar />
-        <main className="overflow-auto">{children}</main>
+        <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

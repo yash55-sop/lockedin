@@ -1,13 +1,16 @@
-import { pgTableCreator } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { siteConfig } from "@/config/site";
 import { env } from "@/lib/env";
 import * as schema from "./schema";
 
 // NOTE: postgres versions above 3.3.5 are not supported on the edge runtime
-const client = postgres(env.DATABASE_URL, { max: 1 });
+// The local template playground does not query Postgres. Workspace routes still
+// require a configured database; the fallback keeps build-time imports harmless.
+const client = postgres(
+  env.DATABASE_URL ?? "postgresql://localhost:5432/lipi",
+  { max: 1 }
+);
 
 export const db = drizzle(client, { schema });
 
@@ -16,6 +19,4 @@ export const db = drizzle(client, { schema });
  *
  * @see https://orm.drizzle.team/docs/goodies#multi-project-schema
  */
-export const createTable = pgTableCreator(
-  (name) => `${siteConfig.name.toLowerCase().replace(/\s/g, "_")}_${name}`
-);
+export { createTable } from "./table-creator";

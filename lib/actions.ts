@@ -5,16 +5,16 @@ import { redirect } from "next/navigation";
 import { compare, hash } from "bcryptjs";
 import { eq } from "drizzle-orm";
 
-import type { resetPasswordSchema, signUpSchema } from "./validations";
 import type { z } from "zod";
 
 import { db } from "./db";
 import { users } from "./db/schema";
+import { resetPasswordSchema, signUpSchema } from "./validations";
 
 export async function createNewAccount(
   credentials: z.infer<typeof signUpSchema>
 ) {
-  const { email, password } = credentials;
+  const { email, password } = signUpSchema.parse(credentials);
 
   const hashedPassword = await hash(password, 10);
 
@@ -28,15 +28,20 @@ export async function createNewAccount(
 
   await db
     .insert(users)
-    .values({ username: randomUUID(), email, password: hashedPassword });
+    .values({
+      username: randomUUID().replaceAll("-", "").slice(0, 15),
+      email,
+      password: hashedPassword,
+    });
 
-  redirect("/");
+  redirect("/login");
 }
 
 export async function resetPassword(
   credentials: z.infer<typeof resetPasswordSchema>
 ) {
-  const { email, password, newPassword } = credentials;
+  const { email, password, newPassword } =
+    resetPasswordSchema.parse(credentials);
 
   const user = await db.query.users.findFirst({
     where: (u, { eq }) => eq(u.email, email),

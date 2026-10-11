@@ -2,104 +2,74 @@
 
 import { unstable_cache as cache, revalidateTag } from "next/cache";
 import { eq } from "drizzle-orm";
-import { validate } from "uuid";
+import { z } from "zod";
 
 import type { File } from "@/types/db";
 
 import { db } from "..";
+import {
+  metadataFields,
+  recordFields,
+  requireFileAccess,
+  requireFolderAccess,
+  requireWorkspaceAccess,
+} from "../access";
 import { files } from "../schema";
 
-/**
- * Create a new file
- * @param file - File object
- * @returns Created file
- */
 export async function createFile(file: File) {
-  try {
-    const [data] = await db.insert(files).values(file).returning();
-
-    return data;
-  } catch (e) {
-    console.error((e as Error).message);
-    throw new Error("Failed to create file");
-  } finally {
-    revalidateTag("get_files");
-  }
+  const fields = recordFields
+    .extend({
+      id: z.string().uuid().optional(),
+      workspaceId: z.string().uuid(),
+      folderId: z.string().uuid(),
+    })
+    .parse(file);
+  await requireWorkspaceAccess(fields.workspaceId);
+  const folder = await requireFolderAccess(fields.folderId);
+  if (folder.workspaceId !== fields.workspaceId || folder.inTrash)
+    throw new Error("Choose an active folder in this workspace.");
+  const [data] = await db.insert(files).values(fields).returning();
+  revalidateTag("get_files");
+  return data;
 }
-
-/**
- * Get all files in a workspace
- * @param workspaceId - ID of the workspace
- * @returns List of files in the workspace
- */
-export const getFiles = cache(
-  async (workspaceId: string) => {
-    const isValid = validate(workspaceId);
-
-    if (!isValid) {
-      throw new Error("Invalid workspace ID");
-    }
-
-    try {
-      const data = await db
-        .select()
-        .from(files)
-        .orderBy(files.createdAt)
-        .where(eq(files.workspaceId, workspaceId));
-
-      return data;
-    } catch (e) {
-      console.error((e as Error).message);
-      throw new Error("Failed to fetch files from the database");
-    }
-  },
+const readFiles = cache(
+  async (workspaceId: string) =>
+    db
+      .select()
+      .from(files)
+      .orderBy(files.createdAt)
+      .where(eq(files.workspaceId, workspaceId)),
   ["get_files"],
   { tags: ["get_files"] }
 );
-
+export async function getFiles(workspaceId: string) {
+  await requireWorkspaceAccess(workspaceId);
+  return readFiles(workspaceId);
+}
 export const getFilesFromDb = getFiles;
-
-/**
- * Update a file
- * @param file - File object
- * @returns Updated file
- */
-export async function updateFile(file: File) {
-  try {
-    const [updatedFile] = await db
-      .update(files)
-      .set(file)
-      .where(eq(files.id, file.id!))
-      .returning();
-
-    return updatedFile;
-  } catch (e) {
-    console.error((e as Error).message);
-    throw new Error("Failed to update file");
-  } finally {
-    revalidateTag("get_files");
-  }
+export async function updateFile(file: Pick<File, "id"> & Partial<File>) {
+  const existing = await requireFileAccess(file.id!);
+  if (
+    (file.workspaceId && file.workspaceId !== existing.workspaceId) ||
+    (file.folderId && file.folderId !== existing.folderId)
+  )
+    throw new Error("Cannot move a file between folders.");
+  // Content is saved through the template action. Sidebar metadata snapshots
+  // can be stale and must never overwrite a newer template document.
+  const fields = metadataFields.parse(file);
+  const [data] = await db
+    .update(files)
+    .set(fields)
+    .where(eq(files.id, existing.id))
+    .returning();
+  revalidateTag("get_files");
+  return data;
 }
-
 export const updateFileInDb = updateFile;
-
-/**
- * Delete file by ID
- * @param fileId Folder ID
- * @returns Deleted file
- */
 export async function deleteFile(fileId: string) {
-  try {
-    const [deletedFile] = await db
-      .delete(files)
-      .where(eq(files.id, fileId))
-      .returning();
-
-    return deletedFile;
-  } catch (e) {
-    console.error((e as Error).message);
-    throw new Error("Failed to delete file");
-  }
+  await requireFileAccess(fileId);
+  const [data] = await db.delete(files).where(eq(files.id, fileId)).returning();
+  revalidateTag("get_files");
+  return data;
 }
-
 export const deleteFileFromDb = deleteFile;

@@ -45,21 +45,20 @@ export function WorkspaceForm({ user }: WorkspaceFormProps) {
   });
 
   async function submitHandler({ name }: FormData) {
-    toast.promise(
-      createWorkspace({
-        title: name,
-        iconId: selectedEmoji,
-        workspaceOwnerId: user.id!,
-      }),
-      {
-        loading: `Creating your workspace "${name}"`,
-        success: (data) => {
-          router.replace(`/dashboard/${data.id}`);
-          return `Your workspace "${name}" was created successfully.`;
-        },
-        error: (e) => e.message,
-      }
-    );
+    const request = createWorkspace({
+      title: name,
+      iconId: selectedEmoji,
+      workspaceOwnerId: user.id!,
+    });
+    toast.promise(request, {
+      loading: `Creating your workspace "${name}"`,
+      success: (data) => {
+        router.replace(`/dashboard/${data.id}`);
+        return `Your workspace "${name}" was created successfully.`;
+      },
+      error: (e) => e.message,
+    });
+    await request.catch(() => undefined);
   }
 
   return (
