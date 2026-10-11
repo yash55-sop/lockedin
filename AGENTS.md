@@ -76,3 +76,5 @@ Keep the original Lipi repository as `upstream` for attribution and reference.
 Use focused conventional commits for completed, verified changes, and push them to
 LockedIn as requested by the user. Preserve unrelated working tree changes and
 never commit credentials, generated output, or browser workspace data.
+CI validates LockedIn commit messages after the pinned upstream fork boundary;
+preserve the imported history instead of rewriting upstream commit messages.

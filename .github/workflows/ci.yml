@@ -38,5 +38,6 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Check commits messages
-        uses: wagoid/commitlint-github-action@v6
+      - name: Check commit messages
+        # Preserve imported Lipi history; enforce conventions on every LockedIn commit.
+        run: npx --no-install commitlint --from eac9a79adf601491372d8bc376b36def3c50d67b --to HEAD

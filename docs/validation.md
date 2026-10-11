@@ -10,6 +10,9 @@ notion-kit repository remains a reference. Existing changes were preserved.
   stale or failed storage writes, invalid renames/selections, last-page deletion,
   and the existing template, AI, and state contracts.
 - TypeScript, ESLint, and the isolated production build pass for the current source.
+  GitHub also passed dependency installation, type checking, lint, tests, and build.
+  CI checks conventional messages for LockedIn commits after the pinned upstream
+  fork boundary, preserving the original Lipi commit history.
 - Browser checks verified explicit legacy-draft restoration, starter creation,
   sidebar rename/search, independent table values across page switches, selected-page
   and value persistence after refresh, desktop active state/collapse, mobile page
