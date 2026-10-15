@@ -9,6 +9,8 @@ import {
   Download,
   LayoutTemplate,
   Loader2,
+  MoreHorizontal,
+  Palette,
   Plus,
   Save,
   Sparkles,
@@ -33,22 +35,37 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { AppStateContext } from "@/hooks/use-app-state";
 import { saveTemplateDocument } from "@/lib/template-actions";
+import { detachTaskSource, localCalendarDate } from "@/lib/template-derived";
 import { planLocalTemplateEdit } from "@/lib/template-edit-plan";
 import {
   generateAiTemplate,
   refineAiTemplate,
 } from "@/lib/template-generation";
+import { composeProductivityTemplate } from "@/lib/template-recipes";
 import {
+  copyTemplateDocument,
   libraryChangeEvent,
   parseReusableTemplates,
 } from "@/lib/template-workspace";
 import {
   blankDocument,
   componentCatalog,
-  composeTemplate,
   createBlock,
   newId,
   starterTemplates,
@@ -72,6 +89,7 @@ type EditorProps = {
   onLocalSave?: (document: TemplateDocument) => boolean;
   onDraftResolved?: () => boolean;
   autosaveError?: boolean;
+  onCreatePage?: (document: TemplateDocument) => boolean | void;
 };
 type LibraryItem = { id: string; name: string; document: TemplateDocument };
 const defaultDocument = blankDocument();
@@ -92,6 +110,7 @@ export function TemplateEditor({
   onLocalSave,
   onDraftResolved,
   autosaveError = false,
+  onCreatePage,
 }: EditorProps) {
   const router = useRouter();
   const appStore = useContext(AppStateContext);
@@ -111,17 +130,22 @@ export function TemplateEditor({
   const [libraryName, setLibraryName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [preview, setPreview] = useState<TemplateDocument | null>(null);
-  const [composerMode, setComposerMode] = useState<"create" | "edit">("create");
+  const [composerMode, setComposerMode] = useState<"create" | "edit">(
+    initialDocument.blocks.length ? "edit" : "create"
+  );
   const [previewBase, setPreviewBase] = useState<string | null>(null);
   const [previewChanges, setPreviewChanges] = useState<string[]>([]);
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [useAi, setUseAi] = useState(aiAvailable);
   const [generating, setGenerating] = useState(false);
   const generationRequest = useRef(0);
+  const createdPageFromComposer = useRef(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [componentsOpen, setComponentsOpen] = useState(false);
+  const [componentSearch, setComponentSearch] = useState("");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
   const draftKey =
     recoveryDraftKey ??
     `lipi:template:draft:${userId}:${target?.kind ?? (localPageId ? "local-page" : "playground")}:${target?.id ?? localPageId ?? "local"}`;
@@ -138,6 +162,23 @@ export function TemplateEditor({
   useEffect(() => {
     documentChangeCallback.current?.(document);
   }, [document]);
+
+  useEffect(() => {
+    if (
+      localPageId &&
+      !initialDocument.blocks.length &&
+      initialDocument.title === "Untitled page"
+    ) {
+      titleInput.current?.focus();
+      titleInput.current?.select();
+    }
+    return () => {
+      // Requests use positive tokens; ignore responses after this editor unmounts.
+      generationRequest.current = -1;
+    };
+    // An editor is remounted for every new page; focus once without interrupting typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (localPageId) return;
@@ -298,9 +339,10 @@ export function TemplateEditor({
   function appendBlocks(blocks: TemplateBlock[]) {
     if (document.blocks.length + blocks.length > 80) {
       toast.error("A template can contain up to 80 components.");
-      return;
+      return false;
     }
     change({ ...document, blocks: [...document.blocks, ...blocks] });
+    return true;
   }
   function moveBlock(index: number, offset: number) {
     const blocks = [...document.blocks];
@@ -326,20 +368,35 @@ export function TemplateEditor({
       );
       return;
     }
-    if (append)
-      appendBlocks(
-        next.blocks.map((block) => {
-          const copy = structuredClone(block);
-          copy.id = newId();
-          if (copy.type === "tasks")
-            copy.items = copy.items.map((item) => ({ ...item, id: newId() }));
-          return copy;
-        })
-      );
-    else change(next);
+    if (append) {
+      if (!appendBlocks(copyTemplateDocument(next).blocks)) return;
+    } else change(next);
     setComposerOpen(false);
     setLibraryOpen(false);
     setPreview(null);
+  }
+  function createPageFromPreview(next: TemplateDocument) {
+    if (draft || generating || !onCreatePage) return;
+    if (previewBase !== JSON.stringify(documentRef.current)) {
+      clearPreview();
+      toast.error(
+        "This page changed after the preview was made. Generate a fresh preview first."
+      );
+      return;
+    }
+    try {
+      const parsed = templateDocumentSchema.parse(next);
+      if (onCreatePage(parsed) === false) return;
+      createdPageFromComposer.current = true;
+      setComposerOpen(false);
+      clearPreview();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ?
+          error.message
+        : "Could not create this page. Your preview is still available."
+      );
+    }
   }
   function clearPreview() {
     generationRequest.current++;
@@ -369,7 +426,11 @@ export function TemplateEditor({
       if (composerMode === "edit") {
         const edit =
           useAi ?
-            await refineAiTemplate(prompt, documentRef.current)
+            await refineAiTemplate(
+              prompt,
+              documentRef.current,
+              localCalendarDate()
+            )
           : planLocalTemplateEdit(prompt, documentRef.current);
         if (request === generationRequest.current) {
           setPreview(edit.document);
@@ -378,13 +439,13 @@ export function TemplateEditor({
           setPreviewWarnings(edit.warnings);
         }
       } else if (useAi) {
-        const next = await generateAiTemplate(prompt);
+        const next = await generateAiTemplate(prompt, localCalendarDate());
         if (request === generationRequest.current) {
           setPreview(next);
           setPreviewBase(base);
         }
       } else {
-        const next = composeTemplate(prompt);
+        const next = composeProductivityTemplate(prompt);
         showPreview(next.document, [], next.warnings);
         if (!next.recognized)
           toast.info(
@@ -584,6 +645,98 @@ export function TemplateEditor({
             : <Save className="mr-2 size-4" />}
             Save
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" aria-label="Page options">
+                <MoreHorizontal className="mr-1.5 size-4" />
+                Page options
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel>Page options</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={exportTemplate}>
+                <Download className="mr-2 size-4" />
+                Export page
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={Boolean(draft)}
+                onSelect={() => importInput.current?.click()}
+              >
+                <Upload className="mr-2 size-4" />
+                Import template
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={Boolean(draft)}
+                onSelect={() => setLibraryOpen(true)}
+              >
+                <LayoutTemplate className="mr-2 size-4" />
+                My templates
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger disabled={Boolean(draft)}>
+                  Page layout
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={String(document.columns)}
+                    onValueChange={(value) =>
+                      change({ ...document, columns: Number(value) as 1 | 2 })
+                    }
+                  >
+                    <DropdownMenuRadioItem value="1">
+                      One column
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="2">
+                      Two columns
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger disabled={Boolean(draft)}>
+                  <Palette className="mr-2 size-4" />
+                  Page accent
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={document.accent}
+                    onValueChange={(value) => {
+                      const accent = value as TemplateColor;
+                      change({
+                        ...document,
+                        accent,
+                        blocks: document.blocks.map((block) => ({
+                          ...block,
+                          color:
+                            block.color === document.accent ?
+                              accent
+                            : block.color,
+                        })),
+                      });
+                    }}
+                  >
+                    {Object.keys(templateColors).map((color) => (
+                      <DropdownMenuRadioItem
+                        key={color}
+                        value={color}
+                        className="capitalize"
+                      >
+                        <span
+                          className="mr-2 size-2 rounded-full"
+                          style={{
+                            backgroundColor:
+                              templateColors[color as TemplateColor],
+                          }}
+                        />
+                        {color}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       {!target && !localPageId && (
@@ -666,6 +819,7 @@ export function TemplateEditor({
         <div className="space-y-3">
           {editing ?
             <Input
+              ref={titleInput}
               aria-label="Page title"
               className="h-auto border-0 px-0 text-3xl font-semibold shadow-none focus-visible:ring-0 sm:text-4xl"
               value={document.title}
@@ -675,7 +829,7 @@ export function TemplateEditor({
                 change({ ...document, title: event.target.value })
               }
             />
-          : <h1 className="text-3xl font-semibold sm:text-4xl">
+          : <h1 className="break-words text-3xl font-semibold sm:text-4xl">
               {document.title}
             </h1>
           }
@@ -690,237 +844,269 @@ export function TemplateEditor({
                 change({ ...document, description: event.target.value })
               }
             />
-          : <p className="text-sm text-muted-foreground">
+          : <p className="break-words text-sm text-muted-foreground">
               {document.description}
             </p>
           }
         </div>
-        {editing && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Dialog
-              open={composerOpen}
-              onOpenChange={(open) => {
-                setComposerOpen(open);
-                if (!open) {
-                  clearPreview();
-                }
+        <div className="flex flex-wrap items-center gap-2">
+          <Dialog
+            open={composerOpen}
+            onOpenChange={(open) => {
+              setComposerOpen(open);
+              clearPreview();
+              if (open)
+                setComposerMode(
+                  documentRef.current.blocks.length ? "edit" : "create"
+                );
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Sparkles className="mr-2 size-4" />
+                Vibe a template
+              </Button>
+            </DialogTrigger>
+            <DialogContent
+              className="max-h-[85vh] max-w-2xl overflow-y-auto"
+              onCloseAutoFocus={(event) => {
+                if (createdPageFromComposer.current) event.preventDefault();
               }}
             >
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Sparkles className="mr-2 size-4" />
-                  Vibe a template
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Describe your productivity space</DialogTitle>
-                  <DialogDescription>
-                    {composerMode === "edit" ?
-                      useAi ?
-                        "AI edit: sends your edit description and the current template to your configured AI provider. Review the proposed changes before applying them."
-                      : "Local edit: applies supported commands in this browser. Your existing data stays intact until you review and apply the changes."
+              <DialogHeader>
+                <DialogTitle>Describe your productivity space</DialogTitle>
+                <DialogDescription>
+                  {composerMode === "edit" ?
+                    useAi ?
+                      "AI edit: sends your edit description and the current template to your configured AI provider. Review the proposed changes before applying them."
+                    : "Local edit: applies supported commands in this browser. Your existing data stays intact until you review and apply the changes."
 
-                    : useAi ?
-                      "AI composer: sends this description to your configured AI provider to design a template using the supported components. Preview the result before applying it."
-                    : "Local composer: recognizes components, named colors, chart styles, and one or two columns. Your description stays in this browser."
-                    }
-                  </DialogDescription>
-                </DialogHeader>
-                <label className="flex items-center gap-2 text-sm">
-                  Action
-                  <select
-                    aria-label="Template action"
-                    className={selectClass}
-                    value={composerMode}
-                    onChange={(event) => {
-                      clearPreview();
-                      setComposerMode(event.target.value as "create" | "edit");
-                    }}
-                  >
-                    <option value="create">Create new template</option>
-                    <option value="edit">Edit current page</option>
-                  </select>
-                </label>
-                {aiAvailable && (
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={useAi}
-                      disabled={generating}
-                      onChange={(event) => {
-                        clearPreview();
-                        setUseAi(event.target.checked);
-                      }}
-                    />
-                    Use AI generation
-                  </label>
-                )}
-                <textarea
-                  aria-label="Template description"
-                  rows={3}
-                  maxLength={2000}
-                  value={prompt}
-                  className={textareaClass}
-                  placeholder={
-                    composerMode === "edit" ?
-                      "Add a heatmap; make graphs purple; set goal target to 20"
-                    : 'A purple dashboard called "My week" with tasks, a habit heatmap, goals, notes, and a line graph'
+                  : useAi ?
+                    "AI composer: sends this description to your configured AI provider to design a template using the supported components. Preview the result before applying it."
+                  : "Local composer: starts with connected study, habit, or project layouts. Study plans support one daily time window and 1–52 consecutive days. Your description stays in this browser."
                   }
+                  {composerMode === "create" &&
+                    onCreatePage &&
+                    " A new template opens as a separate page in your sidebar."}
+                </DialogDescription>
+              </DialogHeader>
+              <label className="flex items-center gap-2 text-sm">
+                Action
+                <select
+                  aria-label="Template action"
+                  className={selectClass}
+                  value={composerMode}
                   onChange={(event) => {
                     clearPreview();
-                    setPrompt(event.target.value);
+                    setComposerMode(event.target.value as "create" | "edit");
                   }}
-                />
-                {composerMode === "edit" && !useAi && (
-                  <p className="text-xs text-muted-foreground">
-                    Separate changes with semicolons. Try: add a green heatmap;
-                    make graphs purple; rename page to &quot;My week&quot;. Use
-                    a component&apos;s title in quotes to select one specific
-                    block.
-                  </p>
-                )}
-                {composerMode === "create" && (
-                  <div className="flex flex-wrap gap-2">
-                    {starterTemplates.map((starter) => (
-                      <Button
-                        key={starter.name}
-                        size="sm"
-                        variant="secondary"
-                        disabled={generating}
-                        onClick={() => {
-                          setPrompt(starter.prompt);
-                          setUseAi(false);
-                          clearPreview();
-                          const composed = composeTemplate(starter.prompt);
-                          showPreview(composed.document, [], composed.warnings);
-                        }}
+                >
+                  <option value="create">Create new template</option>
+                  <option value="edit">Edit current page</option>
+                </select>
+              </label>
+              {aiAvailable && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={useAi}
+                    disabled={generating}
+                    onChange={(event) => {
+                      clearPreview();
+                      setUseAi(event.target.checked);
+                    }}
+                  />
+                  Use AI generation
+                </label>
+              )}
+              <textarea
+                aria-label="Template description"
+                rows={3}
+                maxLength={2000}
+                value={prompt}
+                className={textareaClass}
+                placeholder={
+                  composerMode === "edit" ?
+                    "Add a heatmap; make graphs purple; set goal target to 20"
+                  : "Plan calculus for two weeks, 7–9 PM, with a purple graph and heatmap"
+                }
+                onChange={(event) => {
+                  clearPreview();
+                  setPrompt(event.target.value);
+                }}
+              />
+              {composerMode === "edit" && !useAi && (
+                <p className="text-xs text-muted-foreground">
+                  Separate changes with semicolons. Try: add a green heatmap;
+                  make graphs purple; rename page to &quot;My week&quot;. Use a
+                  component&apos;s title in quotes to select one specific block.
+                </p>
+              )}
+              {composerMode === "create" && (
+                <div className="flex flex-wrap gap-2">
+                  {starterTemplates.map((starter) => (
+                    <Button
+                      key={starter.name}
+                      size="sm"
+                      variant="secondary"
+                      disabled={generating}
+                      onClick={() => {
+                        setPrompt(starter.prompt);
+                        setUseAi(false);
+                        clearPreview();
+                        const composed = composeProductivityTemplate(
+                          starter.prompt
+                        );
+                        showPreview(composed.document, [], composed.warnings);
+                      }}
+                    >
+                      {starter.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <Button
+                disabled={!prompt.trim() || generating}
+                onClick={() => void generatePreview()}
+              >
+                {generating ?
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                : <Sparkles className="mr-2 size-4" />}
+                {generating ? "Designing your template..." : "Generate preview"}
+              </Button>
+              {preview && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div>
+                    <h3 className="font-medium">{preview.title}</h3>
+                    <p className="text-xs text-muted-foreground">
+                      {preview.columns} column
+                      {preview.columns === 2 ? "s" : ""} · {preview.accent} ·
+                      editable components
+                    </p>
+                  </div>
+                  {previewChanges.length > 0 && (
+                    <ul className="list-inside list-disc text-sm">
+                      {previewChanges.map((entry, index) => (
+                        <li key={index}>{entry}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {previewWarnings.map((warning, index) => (
+                    <p
+                      key={index}
+                      role="status"
+                      className="text-sm text-muted-foreground"
+                    >
+                      {warning}
+                    </p>
+                  ))}
+                  <div
+                    className={cn(
+                      "grid gap-3",
+                      preview.columns === 2 && "sm:grid-cols-2"
+                    )}
+                  >
+                    {preview.blocks.map((block) => (
+                      <section
+                        key={block.id}
+                        className={cn(
+                          "min-w-0 space-y-3 rounded-md border p-3",
+                          block.type === "heading" && "sm:col-span-full"
+                        )}
+                        style={{ borderColor: templateColors[block.color] }}
                       >
-                        {starter.name}
-                      </Button>
+                        <h4 className="text-sm font-medium">{block.title}</h4>
+                        <TemplateBlockContent
+                          block={block}
+                          blocks={preview.blocks}
+                          editing={false}
+                          interactive={false}
+                          onChange={() => {}}
+                        />
+                      </section>
                     ))}
                   </div>
-                )}
-                <Button
-                  disabled={!prompt.trim() || generating}
-                  onClick={() => void generatePreview()}
-                >
-                  {generating ?
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  : <Sparkles className="mr-2 size-4" />}
-                  {generating ?
-                    "Designing your template..."
-                  : "Generate preview"}
-                </Button>
-                {preview && (
-                  <div className="space-y-4 rounded-lg border p-4">
-                    <div>
-                      <h3 className="font-medium">{preview.title}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {preview.columns} column
-                        {preview.columns === 2 ? "s" : ""} · {preview.accent} ·
-                        editable components
-                      </p>
-                    </div>
-                    {previewChanges.length > 0 && (
-                      <ul className="list-inside list-disc text-sm">
-                        {previewChanges.map((entry, index) => (
-                          <li key={index}>{entry}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {previewWarnings.map((warning, index) => (
-                      <p
-                        key={index}
-                        role="status"
-                        className="text-sm text-muted-foreground"
-                      >
-                        {warning}
-                      </p>
-                    ))}
-                    <div
-                      className={cn(
-                        "grid gap-3",
-                        preview.columns === 2 && "sm:grid-cols-2"
-                      )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={generating}
+                      onClick={() =>
+                        composerMode === "create" && onCreatePage ?
+                          createPageFromPreview(preview)
+                        : applyTemplate(preview, false)
+                      }
                     >
-                      {preview.blocks.map((block) => (
-                        <section
-                          key={block.id}
-                          className={cn(
-                            "min-w-0 space-y-3 rounded-md border p-3",
-                            block.type === "heading" && "sm:col-span-full"
-                          )}
-                          style={{ borderColor: templateColors[block.color] }}
-                        >
-                          <h4 className="text-sm font-medium">{block.title}</h4>
-                          <TemplateBlockContent
-                            block={block}
-                            editing={false}
-                            interactive={false}
-                            onChange={() => {}}
-                          />
-                        </section>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
+                      {composerMode === "edit" ?
+                        "Apply edits"
+                      : onCreatePage ?
+                        "Create new page"
+                      : document.blocks.length ?
+                        "Replace current page"
+                      : "Use template"}
+                    </Button>
+                    {composerMode === "create" && (
                       <Button
                         size="sm"
-                        disabled={generating}
-                        onClick={() => applyTemplate(preview, false)}
+                        variant="outline"
+                        disabled={
+                          generating ||
+                          document.blocks.length + preview.blocks.length > 80
+                        }
+                        onClick={() => applyTemplate(preview, true)}
                       >
-                        {composerMode === "edit" ?
-                          "Apply edits"
-                        : "Use template"}
-                        {composerMode === "create" && document.blocks.length ?
-                          " (replace page)"
-                        : ""}
+                        Append to current page
                       </Button>
-                      {composerMode === "create" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={
-                            generating ||
-                            document.blocks.length + preview.blocks.length > 80
-                          }
-                          onClick={() => applyTemplate(preview, true)}
-                        >
-                          Append components
-                        </Button>
-                      )}
-                    </div>
-                    {document.blocks.length > 0 && (
+                    )}
+                  </div>
+                  {document.blocks.length > 0 &&
+                    !(composerMode === "create" && onCreatePage) && (
                       <p className="text-xs text-muted-foreground">
                         Applying this preview is undoable until you leave this
                         page.
                       </p>
                     )}
-                  </div>
-                )}
-              </DialogContent>
-            </Dialog>
-            <Dialog open={componentsOpen} onOpenChange={setComponentsOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={document.blocks.length >= 80}
-                >
-                  <Plus className="mr-2 size-4" />
-                  Add component
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[85vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Add a component</DialogTitle>
-                  <DialogDescription>
-                    Build your page one block at a time. Every block is
-                    editable.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid grid-cols-2 gap-2">
-                  {componentCatalog.map((entry) => (
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={componentsOpen}
+            onOpenChange={(open) => {
+              setComponentsOpen(open);
+              if (!open) setComponentSearch("");
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={document.blocks.length >= 80}
+              >
+                <Plus className="mr-2 size-4" />
+                Add component
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add a component</DialogTitle>
+                <DialogDescription>
+                  Build your page one block at a time. Every block is editable.
+                </DialogDescription>
+              </DialogHeader>
+              <Input
+                aria-label="Search components"
+                placeholder="Search components..."
+                value={componentSearch}
+                onChange={(event) => setComponentSearch(event.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                {componentCatalog
+                  .filter((entry) =>
+                    `${entry.label} ${entry.type} ${entry.description}`
+                      .toLowerCase()
+                      .includes(componentSearch.trim().toLowerCase())
+                  )
+                  .map((entry) => (
                     <button
                       key={entry.type}
                       className="rounded-md border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -929,6 +1115,7 @@ export function TemplateEditor({
                           createBlock(entry.type, document.accent),
                         ]);
                         setComponentsOpen(false);
+                        setComponentSearch("");
                       }}
                     >
                       <span className="block text-sm font-medium">
@@ -939,174 +1126,116 @@ export function TemplateEditor({
                       </span>
                     </button>
                   ))}
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="ghost">
-                  <LayoutTemplate className="mr-2 size-4" />
-                  My templates
+              </div>
+              {!componentCatalog.some((entry) =>
+                `${entry.label} ${entry.type} ${entry.description}`
+                  .toLowerCase()
+                  .includes(componentSearch.trim().toLowerCase())
+              ) && (
+                <p
+                  role="status"
+                  className="py-4 text-center text-sm text-muted-foreground"
+                >
+                  No matching components. Try tasks, graph, heatmap, table, or
+                  notes.
+                </p>
+              )}
+            </DialogContent>
+          </Dialog>
+          <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>My templates</DialogTitle>
+                <DialogDescription>
+                  Your reusable templates are stored in this browser. Export to
+                  move them to another device.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2">
+                <Input
+                  aria-label="Reusable template name"
+                  maxLength={100}
+                  placeholder={document.title || "Template name"}
+                  value={libraryName}
+                  onChange={(event) => setLibraryName(event.target.value)}
+                />
+                <Button
+                  disabled={library.length >= 30}
+                  onClick={() => {
+                    const parsed = templateDocumentSchema.safeParse(document);
+                    if (!parsed.success) {
+                      toast.error("Check your template fields before saving.");
+                      return;
+                    }
+                    if (
+                      saveLibrary([
+                        ...library,
+                        {
+                          id: newId(),
+                          name: libraryName.trim() || document.title,
+                          document: parsed.data,
+                        },
+                      ])
+                    ) {
+                      setLibraryName("");
+                      toast.success("Template added to your library.");
+                    }
+                  }}
+                >
+                  Save template
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="max-h-[85vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>My templates</DialogTitle>
-                  <DialogDescription>
-                    Your reusable templates are stored in this browser. Export
-                    to move them to another device.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="flex gap-2">
-                  <Input
-                    aria-label="Reusable template name"
-                    maxLength={100}
-                    placeholder={document.title || "Template name"}
-                    value={libraryName}
-                    onChange={(event) => setLibraryName(event.target.value)}
-                  />
+              </div>
+              {!library.length && (
+                <p className="text-sm text-muted-foreground">
+                  Save this page as your first reusable template.
+                </p>
+              )}
+              {library.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-wrap items-center gap-2 rounded-md border p-3"
+                >
+                  <span className="mr-auto text-sm">{item.name}</span>
                   <Button
-                    disabled={library.length >= 30}
+                    size="sm"
+                    variant="outline"
                     onClick={() => {
-                      const parsed = templateDocumentSchema.safeParse(document);
-                      if (!parsed.success) {
-                        toast.error(
-                          "Check your template fields before saving."
-                        );
-                        return;
-                      }
-                      if (
-                        saveLibrary([
-                          ...library,
-                          {
-                            id: newId(),
-                            name: libraryName.trim() || document.title,
-                            document: parsed.data,
-                          },
-                        ])
-                      ) {
-                        setLibraryName("");
-                        toast.success("Template added to your library.");
-                      }
+                      const copy = copyTemplateDocument(item.document);
+                      clearPreview();
+                      setComposerMode("create");
+                      showPreview(copy);
+                      setLibraryOpen(false);
+                      setComposerOpen(true);
                     }}
                   >
-                    Save template
+                    Preview
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-8"
+                    aria-label={`Delete template ${item.name}`}
+                    onClick={() =>
+                      saveLibrary(
+                        library.filter((entry) => entry.id !== item.id)
+                      )
+                    }
+                  >
+                    <Trash2 className="size-4" />
                   </Button>
                 </div>
-                {!library.length && (
-                  <p className="text-sm text-muted-foreground">
-                    Save this page as your first reusable template.
-                  </p>
-                )}
-                {library.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-wrap items-center gap-2 rounded-md border p-3"
-                  >
-                    <span className="mr-auto text-sm">{item.name}</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const copy = structuredClone(item.document);
-                        copy.blocks = copy.blocks.map((block) => {
-                          block.id = newId();
-                          if (block.type === "tasks")
-                            block.items = block.items.map((task) => ({
-                              ...task,
-                              id: newId(),
-                            }));
-                          return block;
-                        });
-                        clearPreview();
-                        setComposerMode("create");
-                        showPreview(copy);
-                        setLibraryOpen(false);
-                        setComposerOpen(true);
-                      }}
-                    >
-                      Preview
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="size-8"
-                      aria-label={`Delete template ${item.name}`}
-                      onClick={() =>
-                        saveLibrary(
-                          library.filter((entry) => entry.id !== item.id)
-                        )
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </DialogContent>
-            </Dialog>
-            <Button variant="ghost" size="sm" onClick={exportTemplate}>
-              <Download className="mr-2 size-4" />
-              Export
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => importInput.current?.click()}
-            >
-              <Upload className="mr-2 size-4" />
-              Import
-            </Button>
-            <input
-              ref={importInput}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              aria-label="Import a LockedIn template JSON file"
-              onChange={(event) => void importTemplate(event.target.files?.[0])}
-            />
-            <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-              Layout
-              <select
-                className={selectClass}
-                value={document.columns}
-                onChange={(event) =>
-                  change({
-                    ...document,
-                    columns: Number(event.target.value) as 1 | 2,
-                  })
-                }
-              >
-                <option value={1}>One column</option>
-                <option value={2}>Two columns</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              Accent
-              <select
-                className={selectClass}
-                value={document.accent}
-                onChange={(event) => {
-                  const accent = event.target.value as TemplateColor;
-                  change({
-                    ...document,
-                    accent,
-                    blocks: document.blocks.map((block) => ({
-                      ...block,
-                      color:
-                        block.color === document.accent ? accent : block.color,
-                    })),
-                  });
-                }}
-              >
-                {Object.keys(templateColors).map((color) => (
-                  <option key={color} value={color}>
-                    {color}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
+              ))}
+            </DialogContent>
+          </Dialog>
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            aria-label="Import a LockedIn template JSON file"
+            onChange={(event) => void importTemplate(event.target.files?.[0])}
+          />
+        </div>
         {!document.blocks.length && (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-16 text-center">
             <LayoutTemplate className="size-8 text-muted-foreground" />
@@ -1137,8 +1266,17 @@ export function TemplateEditor({
             <section
               key={block.id}
               className={cn(
-                "space-y-4 rounded-lg border bg-card p-4",
-                block.type === "heading" && "md:col-span-full"
+                "min-w-0 space-y-3 rounded-lg border bg-card p-4",
+                block.type === "heading" && "md:col-span-full",
+                document.columns === 2 &&
+                  block.type === "tasks" &&
+                  block.items.length > 4 &&
+                  document.blocks.some(
+                    (entry) =>
+                      "source" in entry &&
+                      entry.source?.taskBlockId === block.id
+                  ) &&
+                  "md:row-span-2"
               )}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -1156,75 +1294,104 @@ export function TemplateEditor({
                       changeBlock({ ...block, title: event.target.value })
                     }
                   />
-                : <h2 className="flex-1 text-sm font-medium">{block.title}</h2>}
+                : <h2 className="min-w-0 flex-1 break-words text-sm font-medium">
+                    {block.title}
+                  </h2>
+                }
                 {editing && (
-                  <div className="ml-auto flex items-center gap-0.5">
-                    <select
-                      aria-label={`${block.title} color`}
-                      className="h-7 max-w-20 rounded-md border bg-background text-xs"
-                      value={block.color}
-                      onChange={(event) =>
-                        changeBlock({
-                          ...block,
-                          color: event.target.value as TemplateColor,
-                        })
-                      }
-                    >
-                      {Object.keys(templateColors).map((color) => (
-                        <option key={color}>{color}</option>
-                      ))}
-                    </select>
-                    <Button
-                      className="size-7"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Move ${block.title} up`}
-                      disabled={index === 0}
-                      onClick={() => moveBlock(index, -1)}
-                    >
-                      <ArrowUp className="size-3" />
-                    </Button>
-                    <Button
-                      className="size-7"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Move ${block.title} down`}
-                      disabled={index === document.blocks.length - 1}
-                      onClick={() => moveBlock(index, 1)}
-                    >
-                      <ArrowDown className="size-3" />
-                    </Button>
-                    <Button
-                      className="size-7"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Duplicate ${block.title}`}
-                      disabled={document.blocks.length >= 80}
-                      onClick={() => duplicateBlock(block)}
-                    >
-                      <Copy className="size-3" />
-                    </Button>
-                    <Button
-                      className="size-7"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete ${block.title}`}
-                      onClick={() =>
-                        change({
-                          ...document,
-                          blocks: document.blocks.filter(
-                            (entry) => entry.id !== block.id
-                          ),
-                        })
-                      }
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        className="ml-auto size-8 shrink-0 text-muted-foreground"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`More options for ${block.title || "component"}`}
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        disabled={index === 0}
+                        onSelect={() => moveBlock(index, -1)}
+                      >
+                        <ArrowUp className="mr-2 size-4" />
+                        Move up
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={index === document.blocks.length - 1}
+                        onSelect={() => moveBlock(index, 1)}
+                      >
+                        <ArrowDown className="mr-2 size-4" />
+                        Move down
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={document.blocks.length >= 80}
+                        onSelect={() => duplicateBlock(block)}
+                      >
+                        <Copy className="mr-2 size-4" />
+                        Duplicate component
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <Palette className="mr-2 size-4" />
+                          Component color
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          <DropdownMenuRadioGroup
+                            value={block.color}
+                            onValueChange={(color) =>
+                              changeBlock({
+                                ...block,
+                                color: color as TemplateColor,
+                              })
+                            }
+                          >
+                            {Object.keys(templateColors).map((color) => (
+                              <DropdownMenuRadioItem
+                                key={color}
+                                value={color}
+                                className="capitalize"
+                              >
+                                <span
+                                  className="mr-2 size-2 rounded-full"
+                                  style={{
+                                    backgroundColor:
+                                      templateColors[color as TemplateColor],
+                                  }}
+                                />
+                                {color}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onSelect={() => {
+                          const detached =
+                            block.type === "tasks" ?
+                              detachTaskSource(document, block.id)
+                            : document;
+                          change({
+                            ...detached,
+                            blocks: detached.blocks.filter(
+                              (entry) => entry.id !== block.id
+                            ),
+                          });
+                        }}
+                      >
+                        <Trash2 className="mr-2 size-4" />
+                        Delete component
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
               </div>
               <TemplateBlockContent
                 block={block}
+                blocks={document.blocks}
                 editing={editing}
                 onChange={changeBlock}
               />

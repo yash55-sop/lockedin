@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import type { TemplateDocument } from "./templates";
 
+import { localCalendarDate } from "./template-derived";
+import { parseStudyWindow } from "./template-recipes";
 import {
   colorSchema,
   createBlock,
@@ -44,6 +46,21 @@ export const generationPlanSchema = z.object({
           .default([]),
         heatmapDays: z.number().int().min(7).max(366).default(84),
         startDate: z.string().max(10).default(""),
+        sourceTaskIndex: z.number().int().min(-1).max(29).default(-1),
+        sourceMeasure: z
+          .enum(["completedTasks", "completedMinutes"])
+          .default("completedTasks"),
+        taskItems: z
+          .array(
+            z.object({
+              text: z.string().min(1).max(500),
+              scheduledDate: z.string().max(10).default(""),
+              scheduledTime: z.string().max(5).default(""),
+              durationMinutes: z.number().int().min(0).max(1440).default(0),
+            })
+          )
+          .max(100)
+          .default([]),
       })
     )
     .min(1)
@@ -104,6 +121,30 @@ export const generationPlanJsonSchema = {
           },
           heatmapDays: { type: "integer" },
           startDate: { type: "string" },
+          sourceTaskIndex: { type: "integer" },
+          sourceMeasure: {
+            type: "string",
+            enum: ["completedTasks", "completedMinutes"],
+          },
+          taskItems: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                text: { type: "string" },
+                scheduledDate: { type: "string" },
+                scheduledTime: { type: "string" },
+                durationMinutes: { type: "integer" },
+              },
+              required: [
+                "text",
+                "scheduledDate",
+                "scheduledTime",
+                "durationMinutes",
+              ],
+            },
+          },
         },
         required: [
           "type",
@@ -118,6 +159,9 @@ export const generationPlanJsonSchema = {
           "tableRows",
           "heatmapDays",
           "startDate",
+          "sourceTaskIndex",
+          "sourceMeasure",
+          "taskItems",
         ],
       },
     },
@@ -125,7 +169,10 @@ export const generationPlanJsonSchema = {
   required: ["title", "description", "accent", "columns", "blocks"],
 };
 
-export function materializeGenerationPlan(input: unknown): TemplateDocument {
+export function materializeGenerationPlan(
+  input: unknown,
+  referenceDate = localCalendarDate()
+): TemplateDocument {
   const plan = generationPlanSchema.parse(input);
   const document: TemplateDocument = {
     version: 1,
@@ -151,6 +198,17 @@ export function materializeGenerationPlan(input: unknown): TemplateDocument {
             text: text.slice(0, 500),
             done: false,
           }));
+      if (block.type === "tasks" && entry.taskItems.length)
+        block.items = entry.taskItems.map((item) => ({
+          id: newId(),
+          text: item.text,
+          done: false,
+          ...(item.scheduledDate ? { scheduledDate: item.scheduledDate } : {}),
+          ...(item.scheduledTime ? { scheduledTime: item.scheduledTime } : {}),
+          ...(item.durationMinutes ?
+            { durationMinutes: item.durationMinutes }
+          : {}),
+        }));
       if (block.type === "chart") {
         block.chartType = entry.chartType;
         if (entry.chartLabels.length)
@@ -161,8 +219,7 @@ export function materializeGenerationPlan(input: unknown): TemplateDocument {
       }
       if (block.type === "heatmap") {
         block.startDate =
-          entry.startDate ||
-          heatmapDate(block.startDate, 84 - entry.heatmapDays);
+          entry.startDate || heatmapDate(referenceDate, 1 - entry.heatmapDays);
         block.values = Array.from({ length: entry.heatmapDays }, () => 0);
       }
       if (block.type === "metric" || block.type === "progress")
@@ -184,6 +241,33 @@ export function materializeGenerationPlan(input: unknown): TemplateDocument {
       return block;
     }),
   };
+  document.blocks.forEach((block, index) => {
+    const entry = plan.blocks[index];
+    if (entry.sourceTaskIndex < 0) return;
+    if (!["metric", "progress", "chart", "heatmap"].includes(block.type))
+      throw new Error(
+        "Only graphs, goals, numbers, and heatmaps can connect to a checklist."
+      );
+    const tasks = document.blocks[entry.sourceTaskIndex];
+    if (tasks?.type !== "tasks")
+      throw new Error(
+        "The connected component needs an existing checklist source."
+      );
+    if (
+      block.type === "metric" ||
+      block.type === "progress" ||
+      block.type === "chart" ||
+      block.type === "heatmap"
+    ) {
+      block.source = {
+        taskBlockId: tasks.id,
+        measure: entry.sourceMeasure,
+        ...(block.type === "chart" ?
+          { startDate: entry.startDate || referenceDate }
+        : {}),
+      };
+    }
+  });
   return templateDocumentSchema.parse(document);
 }
 
@@ -251,7 +335,62 @@ export function assertGenerationCoverage(
   )
     throw new Error("The generated plan omitted the requested heatmap period.");
   const serialized = JSON.stringify(document);
+  const tasks = document.blocks.flatMap((block) =>
+    block.type === "tasks" ? block.items : []
+  );
+  const scheduledTimes = new Set(
+    tasks.flatMap((item) => {
+      if (!item.scheduledTime) return [];
+      const [hours, minutes] = item.scheduledTime.split(":").map(Number);
+      const end = hours * 60 + minutes + (item.durationMinutes ?? 0);
+      return [
+        item.scheduledTime,
+        ...(item.durationMinutes && end < 1440 ?
+          [
+            `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`,
+          ]
+        : []),
+      ];
+    })
+  );
   for (const time of prompt.matchAll(/\b(?:[01]\d|2[0-3]):[0-5]\d\b/g))
-    if (!serialized.includes(time[0]))
+    if (!serialized.includes(time[0]) && !scheduledTimes.has(time[0]))
       throw new Error("The generated plan omitted a requested schedule time.");
+  const study =
+    /\b(?:study|calculus|algebra|exam|learn)\b/i.test(prompt) &&
+    /\b(?:plan|planner|schedule)\b/i.test(prompt);
+  if (
+    study &&
+    !/\b(?:weekdays?|weekends?|except|only|alternate)\b/i.test(prompt)
+  ) {
+    const window = parseStudyWindow(prompt);
+    const period = prompt.match(
+      /\b(\d+|one|two|three|four)\s*[- ]?(days?|weeks?)\b/i
+    );
+    if (window && period) {
+      const words: Record<string, number> = {
+        one: 1,
+        two: 2,
+        three: 3,
+        four: 4,
+      };
+      const count =
+        (words[period[1].toLowerCase()] ?? Number(period[1])) *
+        (/week/i.test(period[2]) ? 7 : 1);
+      const scheduled = tasks.filter(
+        (item) =>
+          item.scheduledDate &&
+          item.scheduledTime === window.start &&
+          item.durationMinutes === window.durationMinutes
+      );
+      if (
+        count > 0 &&
+        count <= 100 &&
+        new Set(scheduled.map((item) => item.scheduledDate)).size < count
+      )
+        throw new Error(
+          `The generated study plan needs ${count} dated daily sessions retaining the requested start time and duration.`
+        );
+    }
+  }
 }

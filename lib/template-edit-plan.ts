@@ -3,10 +3,18 @@ import { z } from "zod";
 import type { TemplateBlock, TemplateDocument } from "./templates";
 
 import {
+  detachTaskSource,
+  localCalendarDate,
+  toggleTaskCompletion,
+  unlinkTemplateBlock,
+} from "./template-derived";
+import {
   blockSchema,
   colorSchema,
   composeTemplate,
   newId,
+  taskItemSchema,
+  taskSourceSchema,
   templateDocumentSchema,
 } from "./templates";
 
@@ -38,13 +46,14 @@ const patchSchema = z
       .optional(),
     startDate: z.string().optional(),
     values: z.array(z.number().int().min(0).max(4)).min(7).max(366).optional(),
+    source: taskSourceSchema.nullable().optional(),
     items: z
       .array(
-        z
-          .object({
-            id: z.string().min(1).max(100),
-            text: z.string().max(500),
-            done: z.boolean(),
+        taskItemSchema
+          .extend({
+            scheduledDate: taskItemSchema.shape.scheduledDate.nullable(),
+            scheduledTime: taskItemSchema.shape.scheduledTime.nullable(),
+            durationMinutes: taskItemSchema.shape.durationMinutes.nullable(),
           })
           .strict()
       )
@@ -101,10 +110,23 @@ export type TemplateEditPreview = {
 export function applyTemplateEditPlan(
   current: TemplateDocument,
   input: unknown,
-  allowNoChanges = false
+  allowNoChanges = false,
+  completionDate = localCalendarDate()
 ): TemplateEditPreview {
   const document = structuredClone(templateDocumentSchema.parse(current));
   const plan = templateEditPlanSchema.parse(input);
+  const addedIds = new Map<string, string>();
+  for (const operation of plan.operations) {
+    if (operation.type !== "add") continue;
+    if (
+      addedIds.has(operation.block.id) ||
+      document.blocks.some((block) => block.id === operation.block.id)
+    )
+      throw new Error(
+        "New components need distinct IDs so connections are unambiguous."
+      );
+    addedIds.set(operation.block.id, newId());
+  }
   const changes: string[] = [];
   for (const operation of plan.operations) {
     if (operation.type === "page") {
@@ -117,7 +139,10 @@ export function applyTemplateEditPlan(
     }
     if (operation.type === "add") {
       const block = structuredClone(operation.block);
-      block.id = newId();
+      block.id = addedIds.get(block.id)!;
+      if ("source" in block && block.source)
+        block.source.taskBlockId =
+          addedIds.get(block.source.taskBlockId) ?? block.source.taskBlockId;
       if (block.type === "tasks")
         block.items = block.items.map((item) => ({ ...item, id: newId() }));
       document.blocks.push(block);
@@ -133,6 +158,8 @@ export function applyTemplateEditPlan(
       );
     const block = document.blocks[index];
     if (operation.type === "remove") {
+      if (block.type === "tasks")
+        document.blocks = detachTaskSource(document, block.id).blocks;
       document.blocks.splice(index, 1);
       changes.push(`Remove ${block.title}`);
     }
@@ -151,11 +178,56 @@ export function applyTemplateEditPlan(
       const allowed = new Set(
         Object.keys(block).filter((key) => key !== "id" && key !== "type")
       );
+      if (["metric", "progress", "chart", "heatmap"].includes(block.type))
+        allowed.add("source");
       if (Object.keys(operation.patch).some((key) => !allowed.has(key)))
         throw new Error(`That field is unavailable for ${block.title}.`);
+      const base =
+        operation.patch.source === null ?
+          unlinkTemplateBlock(block, document.blocks)
+        : block;
+      const { source: patchedSource, ...patch } = operation.patch;
+      if (block.type === "tasks" && patch.items) {
+        patch.items = patch.items.map((item) => {
+          const old = block.items.find((previous) => previous.id === item.id);
+          if (item.completedOn && item.completedOn !== old?.completedOn)
+            throw new Error(
+              "Completion dates are recorded when a task is checked; they cannot be invented by an edit."
+            );
+          const merged = { ...old, ...item };
+          for (const field of [
+            "scheduledDate",
+            "scheduledTime",
+            "durationMinutes",
+          ] as const)
+            if (merged[field] === null) delete merged[field];
+          const parsed = taskItemSchema.parse(merged);
+          // Dates are recorded by the app when completion changes, never guessed by a model.
+          if (old && old.done === parsed.done)
+            return {
+              ...parsed,
+              ...(old.completedOn ? { completedOn: old.completedOn } : {}),
+            };
+          return toggleTaskCompletion(
+            { ...parsed, done: !parsed.done },
+            parsed.done,
+            completionDate
+          );
+        });
+      }
       document.blocks[index] = blockSchema.parse({
-        ...block,
-        ...operation.patch,
+        ...base,
+        ...patch,
+        ...(patchedSource ?
+          {
+            source: {
+              ...patchedSource,
+              taskBlockId:
+                addedIds.get(patchedSource.taskBlockId) ??
+                patchedSource.taskBlockId,
+            },
+          }
+        : {}),
       });
       changes.push(`Update ${block.title}`);
     }
@@ -206,7 +278,7 @@ function splitCommands(prompt: string) {
     if (inQuotes) continue;
     const remaining = prompt.slice(index);
     const separator =
-      /^(?:[,;]\s*(?:and\s+)?|\n+|\s+and\s+)(?=(?:add|append|insert|include|make|set|change|color|recolor|rename|move|remove|delete|mark|complete|uncheck)\b)/i.exec(
+      /^(?:[,;]\s*(?:and\s+)?|\n+|\s+and\s+)(?=(?:add|append|insert|include|make|set|change|color|recolor|rename|move|remove|delete|mark|complete|uncheck|connect|link|disconnect|unlink)\b)/i.exec(
         remaining
       );
     if (separator) {
@@ -274,7 +346,42 @@ export function planLocalTemplateEdit(
     const color = colorSchema.options.find((value) =>
       new RegExp(`\\b${value}\\b`, "i").test(command)
     );
-    if (
+    if (/^(?:make|keep)\s+(?:it|this|the page)\s+minimal\b/i.test(command)) {
+      operations = [{ type: "page", columns: 1 }];
+    } else if (/^(?:disconnect|unlink)\b/i.test(command)) {
+      operations = targets(command, working).map((block) => {
+        if (!("source" in block) || !block.source)
+          throw new Error("That component is already manual.");
+        return { type: "update", blockId: block.id, patch: { source: null } };
+      });
+    } else if (/^(?:connect|link)\b/i.test(command)) {
+      if (names.length !== 2)
+        throw new Error('Use connect "Graph title" to "Checklist title".');
+      const block = targets(`"${names[0]}"`, working)[0];
+      const tasks = targets(`"${names[1]}"`, working, "tasks")[0];
+      if (!["metric", "progress", "chart", "heatmap"].includes(block.type))
+        throw new Error(
+          "Connect a graph, goal, number, or heatmap to a checklist."
+        );
+      operations = [
+        {
+          type: "update",
+          blockId: block.id,
+          patch: {
+            source: {
+              taskBlockId: tasks.id,
+              measure:
+                /\bminutes?\b/i.test(command) ? "completedMinutes" : (
+                  "completedTasks"
+                ),
+              ...(block.type === "chart" ?
+                { startDate: localCalendarDate() }
+              : {}),
+            },
+          },
+        },
+      ];
+    } else if (
       /\b(?:one|1|two|2) columns?\b/i.test(command) &&
       /layout|columns?/i.test(command)
     ) {
@@ -343,10 +450,10 @@ export function planLocalTemplateEdit(
           patch: {
             items: block.items.map((item) =>
               item.text.toLowerCase() === names[0].toLowerCase() ?
-                {
-                  ...item,
-                  done: !/^uncheck|\b(?:not done|incomplete)\b/i.test(command),
-                }
+                toggleTaskCompletion(
+                  item,
+                  !/^uncheck|\b(?:not done|incomplete)\b/i.test(command)
+                )
               : item
             ),
           },
@@ -377,13 +484,23 @@ export function planLocalTemplateEdit(
         patch: { title: names[1] },
       }));
     } else if (/^move\b/i.test(command)) {
-      const block = targets(command, working)[0];
+      const block = targets(names[0] ? `"${names[0]}"` : command, working)[0];
+      const relative =
+        names[1] ? targets(`"${names[1]}"`, working)[0] : undefined;
+      const otherBlocks = working.blocks.filter(
+        (entry) => entry.id !== block.id
+      );
       const index =
         /\b(?:top|first)\b/i.test(command) ? 0
         : /\b(?:bottom|last)\b/i.test(command) ? working.blocks.length - 1
+        : relative && /\b(?:above|before|below|after)\b/i.test(command) ?
+          otherBlocks.findIndex((entry) => entry.id === relative.id) +
+          (/\b(?:below|after)\b/i.test(command) ? 1 : 0)
         : undefined;
-      if (index === undefined)
-        throw new Error('Use move "Component title" to top or bottom.');
+      if (index === undefined || index < 0)
+        throw new Error(
+          'Use move "Component title" to top, bottom, or above/below "Another title".'
+        );
       operations = [{ type: "move", blockId: block.id, index }];
     } else if (/\b(?:goal|target)\b/i.test(command) && /\d/.test(command)) {
       const target =
