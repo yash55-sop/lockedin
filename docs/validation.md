@@ -1,9 +1,37 @@
 # Validation and remaining configuration
 
-Updated October 12, 2026. Work targets LockedIn in the `lipi/` checkout; the adjacent
+Updated October 15, 2026. Work targets LockedIn in the `lipi/` checkout; the adjacent
 notion-kit repository remains a reference. Existing changes were preserved.
 
-## Current LockedIn change
+## Current connected-template change
+
+- The full suite passes 65/65 tests. New coverage verifies actual-day completion,
+  recorded-minute aggregation, daily charts, capped heatmaps, legacy undated data,
+  source validation, copy reference remapping, safe unlink/removal, timed recipes,
+  metadata-preserving AI edits, exact units/colors, and incomplete-plan rejection.
+- TypeScript, full ESLint, and an isolated production build pass. This is local
+  verification; the earlier GitHub result below belongs to the previous workspace change.
+- Browser checks created a fourteen-day calculus plan from `7–9 PM` with fourteen
+  dated tasks at 19:00 and 120 minutes each. Checking one task updated the minute
+  metric, goal, dated graph, and heatmap. These values and schedules survived reload.
+  Editing duration changed linked values; Undo restored them. Test completions were cleared.
+- Live configured AI generated and applied seven dated calculus sessions from
+  19:00–21:00 with connected minute goal, graph, and task heatmap. A subsequent AI edit
+  moved the goal above the checklist and changed graph color while preserving schedules,
+  durations, links, and the checked task's 120 minutes. That test completion was cleared.
+- Habit and project gallery copies start at zero and drive progress from their
+  checklists. A habit planned for an earlier date recorded activity on the actual
+  completion day. Long checklists scroll within a named region without omitting tasks.
+- At 375 px, both project Preview and Edit fit the page without horizontal overflow;
+  expanded Schedule and connection controls fit as well. Unlink/Undo restores the
+  manual/connected state. Existing table containment retains internal scrolling.
+- Earlier interface checks in this change verified Preview-mode import/export/library,
+  multiline persistence, gallery empty searches/cancellation, block menus and Undo,
+  sidebar shortcuts, mobile creation focus, deletion cancellation, and light/dark layout.
+  No existing user page was deleted or replaced. Existing saved pages remain manual
+  unless explicitly connected; refined starter recipes affect new copies only.
+
+## Earlier workspace change (October 12)
 
 - The full suite passes 49/49 tests. Coverage includes legacy workspace migration,
   independent page data/selection across serialization, fresh duplicate identities,
@@ -64,6 +92,11 @@ authenticated workspace storage. API keys remain server-only. Anonymous local AI
 explicit development-only loopback access; production AI still requires login.
 Manual/local composition and browser pages remain available without AI credentials.
 Browser pages/libraries are local; export JSON for portable copies.
+
+The offline daily study planner supports one same-day window and 1–52 consecutive
+calendar days. Weekday selection and overnight windows require AI/manual changes.
+Recorded task minutes are durations supplied by the user/plan, not an elapsed timer.
+Habits are finite dated check-ins and do not automatically recur or reset.
 
 Provider latency and rate limits can cause truthful errors within the bounded
 deadline. The app does not execute arbitrary generated code or implement Notion

@@ -1,11 +1,32 @@
 # Development handoff
 
-Updated October 12, 2026. Recheck the working tree before further edits and preserve
+Updated October 15, 2026. Recheck the working tree before further edits and preserve
 existing work. Product branding is LockedIn; the source checkout remains `lipi/`.
 The adjacent notion-kit project is a read-only reference. Original Lipi attribution,
 MIT notice, database names, and compatible browser keys must remain intact.
 
 ## Product direction and delivered behavior
+
+The study, habit, and project starters now contain connected checklists, goals,
+metrics, graphs, and heatmaps. `lib/template-derived.ts` derives values from task
+completion and recorded durations; actual local completion dates drive daily views.
+`lib/template-recipes.ts` handles bounded offline daily study plans such as
+`Plan calculus for two weeks, 7–9 PM`. Scheduling fields live in collapsed task details.
+Connection controls use existing inputs and details; the UI shell/theme remain.
+Eight starter names remain available, and old saved pages are preserved as-is.
+
+Optional task metadata/source links are backward-compatible version 1 fields.
+When copying, use `copyTemplateDocument` rather than remapping block IDs alone.
+Before removing a checklist, use `detachTaskSource` to preserve calculated values.
+AI item patches merge omitted scheduling/completion metadata; explicit null clears
+schedule fields. New completion dates use the browser calendar day and cannot be
+invented as historical activity. Source schema checks reject dangling references.
+Goal units without a sensible task/minute interpretation remain manual with a warning.
+
+Current UI refinements group block/page actions, keep tools available in Preview,
+provide a real gallery preview and component search, and create separate pages from
+reviewed prompts. Title focus, mobile dialog focus, bounded task scrolling, and table
+paint containment support keyboard/narrow layouts without changing the design system.
 
 Keep the existing editor typography, theme, spacing, and component primitives.
 `app/templates/page.tsx` now mounts `TemplateStudio` outside the lobby layout.
@@ -42,11 +63,11 @@ leave the page unchanged.
 
 ## Verification and next checks
 
-The current full suite passes 49 tests; TypeScript, lint, and the isolated production
-build pass. Browser checks confirmed legacy recovery, starter creation, rename/search,
-page switching and refresh persistence, desktop sidebar collapse/active state,
-mobile navigation, and marketing-route redirects. Earlier
-template checks passed live local/AI workflows; see
+The current full suite passes 65 tests; TypeScript, full lint, and the isolated production
+build pass. Current browser checks confirmed timed offline creation, live connected AI
+creation/refinement, actual-day activity, duration editing, reload, safe unlink/Undo,
+habit/project starters, and narrow Schedule/connection controls. Earlier checks cover
+legacy recovery, sidebar navigation, and Preview-mode tools. See
 [validation](validation.md) for the distinction between current and earlier evidence.
 
 The unit suite covers copy/delete/storage failures. Further manual checks can target
@@ -64,5 +85,5 @@ No proprietary Notion binary was decompiled. Public Notion, shadcn, Radix, 21st.
 and GitHub references informed original component behavior.
 
 Read [architecture](architecture.md), [template behavior](template-components.md),
-and [productivity agent plan](productivity-agent-plan.md) before extending contracts.
+and [free template research](template-design-research.md) before extending contracts.
 Keep credentials and temporary process/server identifiers out of these documents.

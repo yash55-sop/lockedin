@@ -16,6 +16,8 @@ Read these documents when relevant:
 - [Validation](docs/validation.md): completed checks and known limitations.
 - [Handoff notes](docs/development-notes.md): current status and next useful checks.
 - [Productivity agent plan](docs/productivity-agent-plan.md): edit commands and next service checks.
+- [UI workflow](docs/ui-workflow.md) and [free template research](docs/template-design-research.md):
+  public design evidence, original adaptations, and interface invariants.
 
 ## Implementation rules
 
@@ -25,6 +27,9 @@ Read these documents when relevant:
 - Keep templates as typed data rendered by trusted React components. Do not execute
   template strings or downloaded component code as arbitrary JavaScript or HTML.
 - Initialize metrics, charts, progress, and activity from actual user data or zero.
+- Preserve optional task scheduling/completion metadata and checklist source links.
+  Connected values come from `lib/template-derived.ts`; never invent activity or dates.
+  Copy links with remapped IDs and materialize dependent values before removing a source.
 - Preserve browser drafts on failed saves and require explicit draft restoration.
   Preserve legacy content for review and download before conversion.
 - Keep branding separate from persistence: SQL tables retain `lipi_` names and old
