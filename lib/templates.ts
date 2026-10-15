@@ -23,6 +23,32 @@ export const colorSchema = z.enum([
 const text = z.string().max(10000);
 const shortText = z.string().max(200);
 const id = z.string().min(1).max(100);
+export const calendarDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(
+    (value) =>
+      !Number.isNaN(Date.parse(value)) &&
+      new Date(value).toISOString().slice(0, 10) === value,
+    "Invalid date"
+  );
+export const taskItemSchema = z.object({
+  id,
+  text: z.string().max(500),
+  done: z.boolean(),
+  completedOn: calendarDateSchema.optional(),
+  scheduledDate: calendarDateSchema.optional(),
+  scheduledTime: z
+    .string()
+    .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Use a valid 24-hour time")
+    .optional(),
+  durationMinutes: z.number().int().min(1).max(1440).optional(),
+});
+export const taskSourceSchema = z.object({
+  taskBlockId: id,
+  measure: z.enum(["completedTasks", "completedMinutes"]),
+  startDate: calendarDateSchema.optional(),
+});
 const base = { id, title: shortText, color: colorSchema };
 const pointSchema = z.object({
   label: z.string().max(80),
@@ -36,15 +62,14 @@ export const blockSchema = z.discriminatedUnion("type", [
   z.object({
     ...base,
     type: z.literal("tasks"),
-    items: z
-      .array(z.object({ id, text: z.string().max(500), done: z.boolean() }))
-      .max(100),
+    items: z.array(taskItemSchema).max(100),
   }),
   z.object({
     ...base,
     type: z.literal("metric"),
     value: z.number().finite().min(-1e9).max(1e9),
     unit: z.string().max(40),
+    source: taskSourceSchema.optional(),
   }),
   z.object({
     ...base,
@@ -52,26 +77,21 @@ export const blockSchema = z.discriminatedUnion("type", [
     value: z.number().finite().min(0).max(1e9),
     goal: z.number().finite().min(1).max(1e9),
     unit: z.string().max(40),
+    source: taskSourceSchema.optional(),
   }),
   z.object({
     ...base,
     type: z.literal("chart"),
     chartType: z.enum(["bar", "line", "donut"]),
     points: z.array(pointSchema).min(1).max(52),
+    source: taskSourceSchema.optional(),
   }),
   z.object({
     ...base,
     type: z.literal("heatmap"),
-    startDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .refine(
-        (value) =>
-          !Number.isNaN(Date.parse(value)) &&
-          new Date(value).toISOString().slice(0, 10) === value,
-        "Invalid date"
-      ),
+    startDate: calendarDateSchema,
     values: z.array(z.number().int().min(0).max(4)).min(7).max(366),
+    source: taskSourceSchema.optional(),
   }),
   z.object({
     ...base,
@@ -93,6 +113,45 @@ export const templateDocumentSchema = z
   .superRefine((document, context) => {
     const ids = new Set<string>();
     document.blocks.forEach((block, index) => {
+      if ("source" in block && block.source) {
+        if (
+          !document.blocks.some(
+            (candidate) =>
+              candidate.id === block.source!.taskBlockId &&
+              candidate.type === "tasks"
+          )
+        )
+          context.addIssue({
+            code: "custom",
+            path: ["blocks", index, "source", "taskBlockId"],
+            message:
+              "A connected component needs an existing checklist on this page",
+          });
+        if (block.type === "chart" && !block.source.startDate)
+          context.addIssue({
+            code: "custom",
+            path: ["blocks", index, "source", "startDate"],
+            message: "A connected graph needs a start date",
+          });
+        if (
+          block.type === "heatmap" &&
+          block.source.measure !== "completedTasks"
+        )
+          context.addIssue({
+            code: "custom",
+            path: ["blocks", index, "source", "measure"],
+            message: "A connected heatmap counts completed tasks",
+          });
+      }
+      if (block.type === "tasks")
+        block.items.forEach((item, itemIndex) => {
+          if (!item.done && item.completedOn)
+            context.addIssue({
+              code: "custom",
+              path: ["blocks", index, "items", itemIndex, "completedOn"],
+              message: "An incomplete task cannot have a completion date",
+            });
+        });
       if (ids.has(block.id))
         context.addIssue({
           code: "custom",
@@ -127,6 +186,8 @@ export type TemplateDocument = z.infer<typeof templateDocumentSchema>;
 export type TemplateBlock = z.infer<typeof blockSchema>;
 export type BlockType = TemplateBlock["type"];
 export type TemplateColor = z.infer<typeof colorSchema>;
+export type TemplateTask = z.infer<typeof taskItemSchema>;
+export type TaskSource = z.infer<typeof taskSourceSchema>;
 export const componentCatalog: {
   type: BlockType;
   label: string;
@@ -489,7 +550,10 @@ export const starterTemplates = [
 ];
 
 /** Original reusable structures inspired by public productivity patterns, with no invented progress. */
-export function createStarterTemplate(name: string): TemplateDocument {
+export function createStarterTemplate(
+  name: string,
+  referenceDate = dateString(new Date())
+): TemplateDocument {
   const document = blankDocument(name);
   document.columns = 2;
   const accent: TemplateColor =
@@ -499,6 +563,9 @@ export function createStarterTemplate(name: string): TemplateDocument {
     : /Budget/.test(name) ? "orange"
     : "blue";
   document.accent = accent;
+  const today = calendarDateSchema.parse(referenceDate);
+  const weekday = new Date(`${today}T12:00:00`).getDay();
+  const weekStart = heatmapDate(today, -((weekday + 6) % 7));
   const add = (type: BlockType, title: string) => {
     const block = createBlock(type, accent);
     block.title = title;
@@ -541,53 +608,198 @@ export function createStarterTemplate(name: string): TemplateDocument {
   };
   if (/Study|study/.test(name)) {
     document.description =
-      "Plan sessions, track exam preparation, and reflect on your learning. Fill in subjects, dates, and times.";
+      "One focused week: plan real sessions, check them off, and watch your minutes and consistency update.";
+    const sessions = add("tasks", "Study sessions");
+    if (sessions.type === "tasks")
+      sessions.items = [
+        {
+          text: "Read a chapter and write a five-line summary",
+          durationMinutes: 45,
+          scheduledTime: "09:00",
+        },
+        {
+          text: "Practice a problem set and check the solutions",
+          durationMinutes: 45,
+          scheduledTime: "09:00",
+        },
+        {
+          text: "Review flashcards using active recall",
+          durationMinutes: 30,
+          scheduledTime: "10:00",
+        },
+        {
+          text: "Explain one difficult topic without your notes",
+          durationMinutes: 30,
+          scheduledTime: "10:00",
+        },
+        {
+          text: "Review this week's mistakes and plan the next step",
+          durationMinutes: 30,
+          scheduledTime: "16:00",
+        },
+      ].map((item, index) => ({
+        ...item,
+        id: newId(),
+        done: false,
+        scheduledDate: heatmapDate(weekStart, index),
+      }));
+    const minutes = add("metric", "Study minutes completed");
+    if (minutes.type === "metric") {
+      minutes.unit = "minutes";
+      minutes.source = {
+        taskBlockId: sessions.id,
+        measure: "completedMinutes",
+      };
+    }
+    goal("Study goal", 180, "minutes");
+    const target = document.blocks.at(-1)!;
+    if (target.type === "progress")
+      target.source = { taskBlockId: sessions.id, measure: "completedMinutes" };
+    chart("Study minutes this week", "line");
+    const graph = document.blocks.at(-1)!;
+    if (graph.type === "chart")
+      graph.source = {
+        taskBlockId: sessions.id,
+        measure: "completedMinutes",
+        startDate: weekStart,
+      };
+    const activity = add("heatmap", "Study consistency");
+    if (activity.type === "heatmap") {
+      activity.startDate = heatmapDate(weekStart, -21);
+      activity.values = Array(28).fill(0);
+      activity.source = { taskBlockId: sessions.id, measure: "completedTasks" };
+    }
     table(
-      "Weekly sessions",
-      ["Subject", "Date", "Start", "End", "Priority", "Status"],
-      Array.from({ length: 3 }, () => ["", "", "", "", "Medium", "Planned"])
+      "Course resources",
+      ["Subject", "Resource", "Next topic"],
+      [
+        ["", "", ""],
+        ["", "", ""],
+      ]
     );
-    checklist("Study checklist", [
-      "Choose this week's subjects",
-      "Schedule focused sessions",
-      "Review mistakes after practice",
-    ]);
-    goal("Weekly study goal", 10, "sessions");
-    chart("Study hours", "line");
-    add("heatmap", "Study consistency");
-    note("Revision notes", "Capture difficult topics and what to revise next.");
+    note(
+      "Weekly reflection",
+      "What did I learn?\n\nWhich mistakes need another attempt?\n\nWhat is the next small step?\n\nSchedule dates are a plan. Graphs and activity use the actual day you complete each session, and minutes use its recorded duration."
+    );
   } else if (/Habit/.test(name)) {
     document.description =
-      "Build consistent habits and record each day's activity.";
-    add("heatmap", "Daily habits");
-    checklist("Daily routine", [
-      "Choose one small habit",
-      "Make time for it",
-      "Reflect on today",
-    ]);
-    goal("Weekly consistency", 7, "days");
+      "A finite week of small check-ins. Complete a habit once per planned day and see your real activity grow.";
+    const routine = add("tasks", "This week's habit check-ins");
+    if (routine.type === "tasks")
+      routine.items = Array.from({ length: 7 }, (_, index) =>
+        [
+          { text: "Move for ten minutes", durationMinutes: 10 },
+          { text: "Read a few pages", durationMinutes: 10 },
+          { text: "Write one line of reflection", durationMinutes: 5 },
+        ].map((item) => ({
+          ...item,
+          id: newId(),
+          done: false,
+          scheduledDate: heatmapDate(weekStart, index),
+        }))
+      ).flat();
+    const completed = add("metric", "Habit check-ins completed");
+    if (completed.type === "metric") {
+      completed.unit = "check-ins";
+      completed.source = { taskBlockId: routine.id, measure: "completedTasks" };
+    }
+    goal("This week's habit goal", 21, "check-ins");
+    const target = document.blocks.at(-1)!;
+    if (target.type === "progress")
+      target.source = { taskBlockId: routine.id, measure: "completedTasks" };
+    chart("Daily check-ins", "bar");
+    const graph = document.blocks.at(-1)!;
+    if (graph.type === "chart")
+      graph.source = {
+        taskBlockId: routine.id,
+        measure: "completedTasks",
+        startDate: weekStart,
+      };
+    const activity = add("heatmap", "Habit garden");
+    if (activity.type === "heatmap") {
+      activity.startDate = heatmapDate(weekStart, -23);
+      activity.values = Array(30).fill(0);
+      activity.source = { taskBlockId: routine.id, measure: "completedTasks" };
+    }
     note(
-      "Reflection",
-      "What helped you stay consistent? What would make tomorrow easier?"
+      "My reasons",
+      "Movement helps me feel...\n\nReading makes space for...\n\nReflection helps me notice...\n\nRename the habits to match what matters to you. This template contains seven days of check-ins; it does not reset or schedule new habits automatically."
+    );
+    note(
+      "Weekly reflection",
+      "Which habit was easiest to keep?\n\nWhat got in the way?\n\nWhat will I make smaller next week?\n\nCreate a fresh Habit garden from Templates when you want a new week. Duplicating a page preserves its existing completion history."
     );
   } else if (/Project/.test(name)) {
     document.description =
-      "Break a project into milestones, next actions, and decisions.";
-    table(
-      "Project milestones",
-      ["Milestone", "Owner", "Due date", "Status"],
-      [["", "", "", "Planned"]]
+      "Turn an outcome into clear next actions. Completion, effort, and daily activity stay connected.";
+    note(
+      "Project brief",
+      "Outcome: What will be different when this is done?\n\nDefinition of done:\n\nScope and constraints:\n\nTarget date:"
     );
-    checklist("Next actions", [
-      "Define the project outcome",
-      "List the first milestone",
-      "Choose the next action",
-    ]);
-    goal("Milestones completed", 5, "milestones");
-    chart("Weekly effort", "bar");
+    const actions = add("tasks", "Next actions");
+    if (actions.type === "tasks")
+      actions.items = [
+        {
+          text: "Write the outcome and definition of done",
+          durationMinutes: 20,
+        },
+        {
+          text: "Break the first milestone into small deliverables",
+          durationMinutes: 30,
+        },
+        {
+          text: "Complete the smallest useful deliverable",
+          durationMinutes: 60,
+        },
+        {
+          text: "Review the result and resolve one blocker",
+          durationMinutes: 30,
+        },
+        {
+          text: "Finish the handoff and capture what you learned",
+          durationMinutes: 30,
+        },
+      ].map((item, index) => ({
+        ...item,
+        id: newId(),
+        done: false,
+        scheduledDate: heatmapDate(weekStart, index),
+      }));
+    goal("Action plan completed", 5, "actions");
+    const target = document.blocks.at(-1)!;
+    if (target.type === "progress")
+      target.source = { taskBlockId: actions.id, measure: "completedTasks" };
+    const effort = add("metric", "Completed effort");
+    if (effort.type === "metric") {
+      effort.unit = "minutes";
+      effort.source = { taskBlockId: actions.id, measure: "completedMinutes" };
+    }
+    chart("Actions completed this week", "bar");
+    const graph = document.blocks.at(-1)!;
+    if (graph.type === "chart")
+      graph.source = {
+        taskBlockId: actions.id,
+        measure: "completedTasks",
+        startDate: weekStart,
+      };
+    const activity = add("heatmap", "Project momentum");
+    if (activity.type === "heatmap") {
+      activity.startDate = heatmapDate(weekStart, -21);
+      activity.values = Array(28).fill(0);
+      activity.source = { taskBlockId: actions.id, measure: "completedTasks" };
+    }
+    table(
+      "Milestone reference",
+      ["Milestone", "Due date", "Status", "Blocker"],
+      [
+        ["Define the outcome", "", "Planned", ""],
+        ["Build the first deliverable", "", "Planned", ""],
+        ["Review and hand off", "", "Planned", ""],
+      ]
+    );
     note(
       "Decisions and blockers",
-      "Record decisions, dependencies, and questions to resolve."
+      "Decision or blocker:\n\nOwner / next step:\n\nReview date:\n\nThe milestone reference is a manual planning table. Connected progress is calculated from Next actions, so there is one source for completed work."
     );
   } else if (/Reading/.test(name)) {
     document.description =

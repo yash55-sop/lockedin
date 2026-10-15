@@ -107,14 +107,23 @@ export function copyTemplateDocument(
   document: TemplateDocument
 ): TemplateDocument {
   const copy = templateDocumentSchema.parse(structuredClone(document));
+  const blockIds = new Map(copy.blocks.map((block) => [block.id, newId()]));
   copy.blocks = copy.blocks.map((block) => ({
     ...block,
-    id: newId(),
+    id: blockIds.get(block.id)!,
+    ...("source" in block && block.source ?
+      {
+        source: {
+          ...block.source,
+          taskBlockId: blockIds.get(block.source.taskBlockId)!,
+        },
+      }
+    : {}),
     ...(block.type === "tasks" ?
       { items: block.items.map((item) => ({ ...item, id: newId() })) }
     : {}),
   }));
-  return copy;
+  return templateDocumentSchema.parse(copy);
 }
 
 export function addWorkspacePage(

@@ -173,14 +173,29 @@ test("curated starters have fresh identities, original useful structures and zer
   const study = createStarterTemplate("Weekly study planner");
   const table = study.blocks.find((block) => block.type === "table");
   assert.ok(table?.type === "table");
-  assert.deepEqual(table.columns, [
-    "Subject",
-    "Date",
-    "Start",
-    "End",
-    "Priority",
-    "Status",
-  ]);
+  assert.deepEqual(table.columns, ["Subject", "Resource", "Next topic"]);
+  const sessions = study.blocks.find((block) => block.type === "tasks");
+  assert.ok(sessions?.type === "tasks");
+  assert.equal(sessions.items.length, 5);
+  assert.ok(
+    sessions.items.every(
+      (item) =>
+        item.scheduledDate &&
+        item.scheduledTime &&
+        item.durationMinutes &&
+        !item.done &&
+        !item.completedOn
+    )
+  );
+  const connected = study.blocks.filter(
+    (block) => "source" in block && block.source
+  );
+  assert.equal(connected.length, 4);
+  assert.ok(
+    connected.every(
+      (block) => "source" in block && block.source?.taskBlockId === sessions.id
+    )
+  );
 });
 test("stored record rename wins without losing content, and early calendar years round-trip", () => {
   const original = fixture();
