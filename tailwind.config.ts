@@ -3,6 +3,18 @@ import { fontFamily } from "tailwindcss/defaultTheme";
 
 import type { Config } from "tailwindcss";
 
+const notionSans = [
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  "Helvetica",
+  '"Apple Color Emoji"',
+  "Arial",
+  "sans-serif",
+  '"Segoe UI Emoji"',
+  '"Segoe UI Symbol"',
+];
+
 const config = {
   darkMode: ["class"],
   content: [
@@ -60,9 +72,9 @@ const config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)", ...fontFamily.sans],
+        sans: notionSans,
         mono: ["var(--font-mono)", ...fontFamily.mono],
-        heading: ["var(--font-heading)", ...fontFamily.sans],
+        heading: notionSans,
         handwriting: ["var(--font-handwriting)", ...fontFamily.sans],
       },
       keyframes: {

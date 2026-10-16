@@ -8,7 +8,7 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import { siteConfig } from "@/config/site";
-import { fontHandwriting, fontHeading, fontMono, fontSans } from "@/lib/fonts";
+import { fontHandwriting, fontMono } from "@/lib/fonts";
 import { absoluteUrl, cn } from "@/lib/utils";
 
 export const viewport: Viewport = {
@@ -67,9 +67,7 @@ export default function RootLayout({ children }: React.PropsWithChildren) {
       <html lang="en" suppressHydrationWarning>
         <body
           className={cn(
-            fontSans.variable,
             fontMono.variable,
-            fontHeading.variable,
             fontHandwriting.variable,
             "min-h-screen scroll-smooth font-sans antialiased selection:bg-foreground selection:text-background"
           )}

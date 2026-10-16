@@ -1,11 +1,20 @@
 # Development handoff
 
-Updated October 15, 2026. Recheck the working tree before further edits and preserve
+Updated October 16, 2026. Recheck the working tree before further edits and preserve
 existing work. Product branding is LockedIn; the source checkout remains `lipi/`.
 The adjacent notion-kit project is a read-only reference. Original Lipi attribution,
 MIT notice, database names, and compatible browser keys must remain intact.
 
 ## Product direction and delivered behavior
+
+Typography now uses a Notion-style native sans stack for body text, headings, forms,
+menus, and dialogs: Apple system fonts on macOS and Segoe UI on Windows, with
+Helvetica/Arial and emoji fallbacks. Inter and CalSans are no longer loaded as app
+fonts. Monospace and handwriting styles remain available for their existing special
+uses. The font change was explicitly requested; retain existing sizing, weights,
+theme, and layout. This follows the Default sans-serif direction described in
+[Notion's page styling help](https://www.notion.com/help/customize-and-style-your-content),
+not a downloaded proprietary font or a new font-selection feature.
 
 The study, habit, and project starters now contain connected checklists, goals,
 metrics, graphs, and heatmaps. `lib/template-derived.ts` derives values from task
